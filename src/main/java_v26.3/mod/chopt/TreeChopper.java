@@ -24,6 +24,7 @@ import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.SoundType;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.feature.stateproviders.RuleBasedStateProvider;
 import net.minecraft.sounds.SoundSource;
@@ -172,9 +173,13 @@ public final class TreeChopper {
 			// Use the stored original state so drops aren't stripped
 			Block.dropResources(original, level, pos, level.getBlockEntity(pos), player, player.getMainHandItem());
 		}
+		BlockState broken = original != null ? original : level.getBlockState(pos);
+		// a log has no block entity, and a stump's belongs to the stump rather than the log we report
+		BlockEntity brokenEntity = original != null ? null : level.getBlockEntity(pos);
 		// Play break sound/particles for all nearby players
-		level.levelEvent(2001, pos, Block.getId(original != null ? original : level.getBlockState(pos)));
+		level.levelEvent(2001, pos, Block.getId(broken));
 		level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
+		fireAfterBreak(level, player, pos, broken, brokenEntity);
 
 		PROCESSING.set(true);
 		try {
@@ -195,6 +200,10 @@ public final class TreeChopper {
 				Block.dropResources(stumpOriginal, level, stumpPos, null, player, held);
 			}
 			level.setBlock(stumpPos, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS);
+			if (stumpOriginal != null) {
+				// the stump stands in for a log, so report the log the player actually harvested
+				fireAfterBreak(level, player, stumpPos, stumpOriginal, null);
+			}
 		}
 		SESSIONS.remove(session.key());
 		return false; // we've handled the break and drops ourselves
@@ -202,6 +211,21 @@ public final class TreeChopper {
 
 	private static void afterBreak(Level level, Player player, BlockPos pos, BlockState state, /* nullable */ Object blockEntity) {
 		// No-op: drops and cleanup handled in beforeBreak
+	}
+
+	/**
+	 * Felling cancels the vanilla break, so AFTER never fires for the logs Chopt removes itself; re-fire
+	 * it per log with the pre-chop state that produced the drops, so log-break listeners still see them.
+	 */
+	private static void fireAfterBreak(Level level, Player player, BlockPos pos, BlockState state, /* nullable */ BlockEntity blockEntity) {
+		// a listener that breaks blocks of its own must not re-enter felling while this session tears down
+		boolean wasProcessing = PROCESSING.get();
+		PROCESSING.set(true);
+		try {
+			PlayerBlockBreakEvents.AFTER.invoker().afterBlockBreak(level, player, pos, state, blockEntity);
+		} finally {
+			PROCESSING.set(wasProcessing);
+		}
 	}
 
 	private static Session buildSession(Level level, BlockPos origin, /* nullable */ BlockPos baseOverride) {
@@ -427,10 +451,12 @@ public final class TreeChopper {
 			}
 
 			BlockState original = entry.getValue();
-			Block.dropResources(original, level, pos, level.getBlockEntity(pos), player, player.getMainHandItem());
+			BlockEntity blockEntity = level.getBlockEntity(pos);
+			Block.dropResources(original, level, pos, blockEntity, player, player.getMainHandItem());
 			// Play break sound/particles for all nearby players
 			level.levelEvent(2001, pos, Block.getId(original));
 			level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
+			fireAfterBreak(level, player, pos, original, blockEntity);
 			felled++;
 		}
 
@@ -537,14 +563,18 @@ public final class TreeChopper {
 			BlockPos logPos = entry.getKey();
 			BlockState original = entry.getValue();
 
-			if (level.getBlockState(logPos).isAir()) {
+			BlockState live = level.getBlockState(logPos);
+			if (live.isAir()) {
 				continue; // already removed by something else
 			}
 
-			Block.dropResources(original, level, logPos, level.getBlockEntity(logPos), player, player.getMainHandItem());
+			BlockEntity blockEntity = level.getBlockEntity(logPos);
+			Block.dropResources(original, level, logPos, blockEntity, player, player.getMainHandItem());
 			// Play break sound/particles for all nearby players
 			level.levelEvent(2001, logPos, Block.getId(original));
 			level.setBlock(logPos, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS);
+			// a stump's block entity belongs to the stump, not to the log state we report
+			fireAfterBreak(level, player, logPos, original, live.is(original.getBlock()) ? blockEntity : null);
 			felled++;
 		}
 		return felled;
