@@ -6,32 +6,57 @@ Polymer instead of a client-only `BlockEntityRenderer`, so the mod becomes genui
 Claims about chopt's current behaviour were read out of `src/main/java_v26.3/` and
 `src/client/java_v26.3/` and are cited inline. Claims about the Polymer API were checked with
 `javap` against the nested jars inside `polymer-bundled-0.18.1+26.3.jar` downloaded from Modrinth —
-that is the version chopt's primary target would actually run, and it is a different minor line
-from the 0.17.5 source checkout at `libs/polymer` (branch `dev/26.2`). Two things are **not**
-verified and are called out where they matter: what a vanilla client does today when it meets an
-unknown block-state id, and whether a virtual display element can be hidden from one player while
-shown to another.
+that is the version chopt's primary target would actually run. Claims about registry sync were read
+from the `fabric-registry-sync-v0` 7.1.0 sources jar. That a vanilla client cannot connect to a
+chopt server at all was confirmed in-world; it is the observation this document is built around.
+One thing is **not** verified and is called out where it matters: whether a virtual display element
+can be shown to one player and hidden from another.
 
-S1 is a build-system change and unblocks everything else. S2 is the smallest change that makes a
-vanilla client usable and is worth landing on its own. S3 is what actually delivers the feature —
-after S3 a vanilla client sees the same thing a chopt client sees, and the feature is complete.
-S4 and S5 are independent of each other and both optional: S4 restores the higher-fidelity `BER`
-path for clients that do have chopt, S5 is cleanup that only becomes possible once S4 exists.
+S1 is a build-system change and unblocks everything else. S2 has two halves that must land
+together — letting a vanilla client through the door at all, and giving it a sane block once it is
+in — and until it lands nothing downstream is observable, because there is no client to observe it
+with. S3 is what actually delivers the feature: after S3 a vanilla client sees what a chopt client
+sees, and the feature is complete. S4 and S5 are independent of each other and both optional: S4
+restores the higher-fidelity `BER` path for clients that do have chopt, S5 is cleanup that only
+becomes possible once S4 exists.
 
 ---
 
 ## Findings that reshape the work
 
-**`polymer-networking` does not exist in the 0.18.x line, so the usual handshake pattern is
-unavailable on chopt's primary target.** `polymer-bundled-0.18.1+26.3.jar` nests exactly eight
-module jars — `autohost`, `blocks`, `common`, `core`, `resource-pack`, `resource-pack-extras`,
-`sound-patcher`, `virtual-entity`. There is no `polymer-networking` among them, and the only
-`networking` package left in `polymer-core` is `eu.pb4.polymer.core.impl.client.networking`, which
-is implementation-internal. The 0.17.x line did ship it as a separate module. Every workspace
-recipe that reaches for `PolymerNetworking` to register a versioned capability packet therefore
-does not port to 26.3. S4 uses `PolymerSyncedObject.canSynchronizeToPolymerClient(PacketContext)`
-for "is this a polymer client" and chopt's own `ChoptNetworking` payload for "does this client have
-chopt", rather than a Polymer handshake.
+**A vanilla client is disconnected during configuration, before any of this rendering work can
+matter, and Polymer does not fix that.** Fabric's `RegistrySyncManager` builds a map of every
+registry carrying both the `SYNCED` and `MODDED` attributes; chopt's two registrations at
+`ChoptBlocks.java:43`–`:44` are enough to flip `BLOCK` and `BLOCK_ENTITY_TYPE` to `MODDED`. If the
+client cannot receive `RegistrySyncPayload` — the definition of a vanilla client — the server takes
+one of two branches: return quietly if `areAllRegistriesOptional(map)`, otherwise disconnect with
+"This server requires Fabric Loader and Fabric API installed on your client!" followed by the
+offending namespaces. Nothing in Polymer intervenes here. Searching every class in all eight
+modules of `polymer-bundled-0.18.1+26.3.jar` finds exactly one that references
+`net.fabricmc.fabric.api.event.registry` at all — `PolymerImplUtils`, and only inside its
+`dumpRegistry()` diagnostic. The one Fabric-sync mixin polymer-core ships,
+`compat.fabric.fabricSync_StateIdTrackerMixin`, clears a state-id `IdMapper` and has nothing to do
+with the disconnect. **Polymer makes the packets a vanilla client receives sane; it does not get
+that client through the door.** Both halves are needed, which is why S2 covers both.
+
+**The fix is a registry attribute chopt sets itself, not another dependency.**
+`RegistryAttributeHolder.get(Registry<?>).addAttribute(RegistryAttribute.OPTIONAL)` marks a
+registry so that, in Fabric's own words, "any connecting client will not be disconnected if the
+registry is not present" — which is precisely the `areAllRegistriesOptional` branch above. The
+wholesale version of this is `polymer-registry-sync-manipulator`, but that is not a standalone
+Modrinth project in either the 0.17.x or 0.18.x line; it is a Maven-only module that consuming mods
+jar-in-jar, and it is absent from both `polymer-bundled-0.17.5+26.2` and `-0.18.1+26.3`, and from
+the live server's mod folder. Two `addAttribute` calls are cheaper than vendoring it.
+
+**Neither Polymer bundle ships `polymer-networking`, so S4 cannot assume it.** Both
+`polymer-bundled-0.17.5+26.2` and `polymer-bundled-0.18.1+26.3` nest the same eight modules —
+`autohost`, `blocks`, `common`, `core`, `resource-pack`, `resource-pack-extras`, `sound-patcher`,
+`virtual-entity` — and `polymer-networking` is not among them in either. Like `rsm` it is a
+Maven-only module, not a Modrinth download, so a server running stock Polymer will not have it.
+Every workspace recipe that reaches for `PolymerNetworking` to register a versioned capability
+packet therefore cannot be assumed to work here. S4 uses
+`PolymerSyncedObject.canSynchronizeToPolymerClient(PacketContext)` for "is this a polymer client"
+and chopt's own `ChoptNetworking` payload for "does this client have chopt" instead.
 
 **chopt already ships the element-less client model that a Polymer block needs.**
 `assets/chopt/models/block/shrinking_stump_placeholder.json` has `"elements": []` and a single
@@ -84,17 +109,16 @@ and must stay without chopt for S2 and S3, needing only Fabric API to connect) a
 Modpack** (26.2, already carries `polymer-bundled-0.17.5+26.2`, so it is the client that exercises
 the S4 path once chopt is installed into it).
 
-A stage is not finished until its "Done when" has been observed with both clients connected at the
-same time. That simultaneity is the point: the whole feature is about two clients disagreeing about
-what a block looks like while agreeing about what it does. Testing them one after the other will
-hide exactly the bugs this work can introduce.
+From S3 onward a stage is not finished until its "Done when" has been observed with both clients
+connected at the same time. That simultaneity is the point: the whole feature is about two clients
+disagreeing about what a block looks like while agreeing about what it does. Testing them one after
+the other will hide exactly the bugs this work can introduce.
 
-Before the first round, confirm the premise that motivates all of it: connect the vanilla client to
-a chopt server as it stands today and record what actually happens at a stump. The expectation is
-that the unknown block-state id resolves to air on the client, since chopt's states are appended
-after every vanilla state, but this has not been checked and the failure mode could instead be a
-disconnect on registry sync. If it turns out a vanilla client cannot connect at all, S2 grows to
-cover registry sync and stops being small.
+That two-client setup does not exist yet. A vanilla client currently cannot connect to a chopt
+server at all — it is disconnected during configuration by Fabric's registry sync, as described in
+the findings. So the first half of S2 is not just the first stage with a visible result, it is the
+stage that builds the test harness every later stage depends on. Until it lands there is no way to
+observe anything from a client without chopt, and "it compiles" is all the feedback available.
 
 ## S1 — Optional, version-gated Polymer dependency — **planned**
 
@@ -104,8 +128,10 @@ present, exclusion of `**/compat/polymer/**` from the jar when it is absent (`:2
 of the `polymer` entry from `fabric.mod.json`'s `suggests` when absent (`:161`). Polymer belongs in
 `suggests`, never `depends` — the mod has to keep loading without it. Add `polymer_version` to the
 `26.1`, `26.1.1`, `26.1.2`, `26.2` and `26.3` profiles under `gradle/profiles/` only; the 1.20.1
-and 1.21.x profiles stay without it. New code lives in `src/main/java_v<mc>/mod/chopt/compat/polymer/`
-so the existing per-version source-root injection picks it up.
+and 1.21.x profiles stay without it. Polymer-specific code lives in
+`src/main/java_v<mc>/mod/chopt/compat/polymer/` so the existing per-version source-root injection
+picks it up — note that S2's registry-attribute half is Fabric API, not Polymer, and stays outside
+that package.
 
 **Done when.** `./gradlew build` is green for the 26.3 profile with the key set and for the 1.20.1
 profile without it, and `unzip -l` on the two jars shows `mod/chopt/compat/polymer/` present in the
@@ -117,20 +143,40 @@ match how `jadeVersion` already reads, and that the compat package cannot be ref
 unconditionally-compiled code. Reach it the way the Jade compat is reached, through an entrypoint
 or a reflective/`FabricLoader.isModLoaded` guard, not a direct call from `Chopt.onInitialize`.
 
-## S2 — Substitute block state and server-side mining — **planned**
+## S2 — Registry sync, substitute block state and server-side mining — **planned**
 
-**Build.** Make `ShrinkingStumpBlock` implement `PolymerBlock`. `getPolymerBlockState` returns a
-species-independent substitute for every state — see Open decisions for the choice between
-`Blocks.BARRIER` and a fixed stripped log. Override `handleMiningOnServer` to return true so the
-server drives break progress rather than trusting a client that thinks the block is unbreakable.
-Add `.isRedstoneConductor((state, level, pos) -> false)` to the properties at `ChoptBlocks.java:24`.
+**Build.** Two halves, in this order, both inside the gated compat package from S1.
 
-**Done when.** The vanilla client joins, can target a stump, chop it with repeated swings, and fell
-the tree — the gameplay effect is the actual requirement here. The display effect at this stage is
-only "something sane instead of a missing-model cube or nothing"; a full-size or invisible stump is
-an acceptable intermediate, because S3 is what fixes the visuals. Separately, place a chest
-directly under a stump and confirm it still opens, which is the observable probe for the
-redstone-conductor regression.
+The first half gets a vanilla client through configuration. In chopt's initialiser, after
+`ChoptBlocks.register()` (`Chopt.java:10`), mark both registries chopt writes into as optional:
+`RegistryAttributeHolder.get(BuiltInRegistries.BLOCK).addAttribute(RegistryAttribute.OPTIONAL)` and
+the same for `BuiltInRegistries.BLOCK_ENTITY_TYPE`. This has to run unconditionally, not behind the
+Polymer gate — it is a Fabric API call, `fabric-registry-sync-v0` already arrives with the
+`fabric-api` dependency chopt declares, and a chopt server should stop turning vanilla clients away
+whether or not Polymer is installed. It is also the only part of this document that changes
+behaviour for servers with no Polymer at all.
+
+The second half gives that client something sane to look at. Make `ShrinkingStumpBlock` implement
+`PolymerBlock`; `getPolymerBlockState` returns a species-independent substitute for every state —
+see Open decisions for the choice between `Blocks.BARRIER` and a fixed stripped log. Override
+`handleMiningOnServer` to return true so the server drives break progress rather than trusting a
+client that thinks the block is unbreakable. Add
+`.isRedstoneConductor((state, level, pos) -> false)` to the properties at `ChoptBlocks.java:24`.
+
+**Done when.** A vanilla 26.3 client — no Fabric, no chopt — connects to a chopt dev server and
+stays connected, which on its own retires the disconnect. Then, at a tree: it can target a stump,
+chop it with repeated swings, and fell the tree. That gameplay effect is the actual requirement
+here. The display effect at this stage is only "something sane instead of a missing-model cube or
+nothing"; a full-size or invisible stump is an acceptable intermediate, because S3 is what fixes
+the visuals. Separately, place a chest directly under a stump and confirm it still opens, which is
+the observable probe for the redstone-conductor regression.
+
+Marking `BLOCK` optional is a registry-wide flag, not a chopt-scoped one: it relaxes the check for
+every mod on that server, so a second mod with real client-side content could then let a vanilla
+client in and break in a way it previously prevented. That is the same trade
+`polymer-registry-sync-manipulator` makes wholesale, and it is the accepted one for a mod that
+intends to be server-side, but it should be a deliberate choice rather than a side effect — say so
+in the README line this work is meant to make true.
 
 ## S3 — Virtual display entity for the shrinking stump — **planned**
 
@@ -233,6 +279,29 @@ types below are the real ones, including Fabric's
 Polymer releases relevant here: `0.18.1+26.3` and `0.18.0+26.3-rc-1` on Modrinth for 26.3;
 `0.17.5+26.2` for 26.2, which is what `libs/polymer` (branch `dev/26.2`) contains and what the
 Kalic0 Modpack profile runs.
+
+## Reference: how Fabric registry sync rejects a client
+
+Read from the `fabric-registry-sync-v0` 7.1.0 sources jar, class
+`net.fabricmc.fabric.impl.registry.sync.RegistrySyncManager`.
+
+`createAndPopulateRegistryMap()` walks the registries and keeps one only if its
+`RegistryAttributeHolder` has **both** `SYNCED` and `MODDED`; anything else is skipped with a debug
+log. A registry gains `MODDED` when an entry outside the `minecraft` namespace is registered into
+it. If the resulting map is empty the method returns null and no sync happens at all.
+
+On a non-null map the server checks `ServerConfigurationNetworking.canSend(handler,
+RegistrySyncPayload.ID)`. A client that can receive it gets a `SyncConfigurationTask`. A client that
+cannot — any vanilla client — falls to `areAllRegistriesOptional(map)`, which requires every
+registry in the map to carry `RegistryAttribute.OPTIONAL`. If that holds the server returns and the
+client connects with no sync; otherwise the server calls `handler.disconnect(...)` with the
+"This server requires ... installed on your client!" component, listing up to a few of the
+namespaces involved.
+
+The three attributes are `SYNCED`, `MODDED` and `OPTIONAL`, and the holder API is just
+`RegistryAttributeHolder.get(ResourceKey<?>)` / `get(Registry<?>)` plus `addAttribute` and
+`hasAttribute`. `OPTIONAL` is documented as "Registry is optional, any connecting client will not
+be disconnected if the registry is not present."
 
 ## Reference: how the stump displays today
 
