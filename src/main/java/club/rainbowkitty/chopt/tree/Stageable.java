@@ -106,6 +106,17 @@ public final class Stageable {
     }
 
     /**
+     * The four cells of the 2x2 trunk that the cell at {@code pos}, whose bark faces
+     * {@code corner}, belongs to: northwest first and then clockwise.
+     */
+    public static List<BlockPos> quarterCells(BlockPos pos, Corner corner) {
+        int east = corner == Corner.NORTHEAST || corner == Corner.SOUTHEAST ? 1 : 0;
+        int south = corner == Corner.SOUTHEAST || corner == Corner.SOUTHWEST ? 1 : 0;
+        BlockPos northwest = pos.offset(-east, 0, -south);
+        return List.of(northwest, northwest.east(), northwest.east().south(), northwest.south());
+    }
+
+    /**
      * The four cells of the 2x2 trunk the quarter log at {@code pos} belongs to, northwest first
      * and then clockwise, or null when the group is not whole: a cell unloaded, broken, not
      * upright, facing the wrong corner, placed rather than natural, or stripping differently.
@@ -116,11 +127,7 @@ public final class Stageable {
         if (corner == null || !isVertical(state)) {
             return null;
         }
-        int east = corner == Corner.NORTHEAST || corner == Corner.SOUTHEAST ? 1 : 0;
-        int south = corner == Corner.SOUTHEAST || corner == Corner.SOUTHWEST ? 1 : 0;
-        BlockPos northwest = pos.offset(-east, 0, -south);
-        List<BlockPos> cells = List.of(northwest, northwest.east(), northwest.east().south(),
-                northwest.south());
+        List<BlockPos> cells = quarterCells(pos, corner);
         Corner[] expected = Corner.values();
         Block stripped = null;
         for (int i = 0; i < 4; i++) {

@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 
 import net.minecraft.resources.Identifier;
 
+import club.rainbowkitty.chopt.block.ChoptBlocks;
 import club.rainbowkitty.chopt.command.ChoptCommand;
 import club.rainbowkitty.chopt.ledger.PlacedLogs;
 
@@ -23,6 +24,7 @@ public class Chopt implements ModInitializer {
     public void onInitialize() {
         ChoptSettings.register();
         PlacedLogs.register();
+        ChoptBlocks.init();
         ChoptCommand.register();
     }
 }
