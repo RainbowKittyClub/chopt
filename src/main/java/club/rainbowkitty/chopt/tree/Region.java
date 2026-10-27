@@ -22,9 +22,8 @@ import club.rainbowkitty.chopt.ChoptSettings;
 import club.rainbowkitty.chopt.ledger.Provenance;
 
 /**
- * The logs one cut brings down: the cut cluster and every natural log that hangs from it. An
- * upright trunk or a 2x2 trunk fells what lies above and beside it; a horizontal log or a small
- * log fells what hangs from it by the cheapest path to the ground.
+ * The logs one cut brings down: the cut cluster and every natural log that hangs from it, by the
+ * cheapest path of each log to the ground.
  *
  * @param family the shape of the cut log
  * @param cluster the logs the cut breaks itself: the log, or a quarter log's four cells
@@ -66,12 +65,9 @@ public record Region(Family family, List<BlockPos> cluster, List<BlockPos> membe
         }
         if (family == Family.QUARTER) {
             List<BlockPos> group = Stageable.quarterGroup(level, origin, state);
-            return group == null ? none(family) : upwardScan(level, group, family);
+            return group == null ? none(family) : hangFrom(level, group, family);
         }
-        if (family == Family.PILLAR && Stageable.isVertical(state)) {
-            return upwardScan(level, List.of(origin), family);
-        }
-        return hangFrom(level, origin, family);
+        return hangFrom(level, List.of(origin), family);
     }
 
     /**
@@ -86,62 +82,38 @@ public record Region(Family family, List<BlockPos> cluster, List<BlockPos> membe
         }
         Stageable.Corner corner = Stageable.barkSide(original);
         if (family == Family.QUARTER && corner != null) {
-            return upwardScan(level, Stageable.quarterCells(master, corner), family);
+            return hangFrom(level, Stageable.quarterCells(master, corner), family);
         }
-        if (family == Family.PILLAR && Stageable.isVertical(original)) {
-            return upwardScan(level, List.of(master), family);
-        }
-        return hangFrom(level, master, family);
+        return hangFrom(level, List.of(master), family);
     }
 
-    // Breadth first through natural logs from the cluster, 26 neighbours, never below its layer.
-    private static Region upwardScan(ServerLevel level, List<BlockPos> cluster, Family family) {
-        int cap = ChoptSettings.MAX_LOGS.get(level.getServer());
-        int floor = cluster.get(0).getY();
-        Set<BlockPos> seen = new LinkedHashSet<>(cluster);
-        Deque<BlockPos> queue = new ArrayDeque<>(cluster);
-        while (!queue.isEmpty() && seen.size() < cap) {
-            BlockPos current = queue.poll();
-            for (BlockPos offset : NEIGHBOURS) {
-                BlockPos next = current.offset(offset);
-                if (next.getY() < floor || seen.contains(next) || seen.size() >= cap) {
-                    continue;
-                }
-                if (level.hasChunkAt(next) && level.getBlockState(next).is(BlockTags.LOGS)
-                        && Provenance.isNatural(level, next)) {
-                    seen.add(next);
-                    queue.add(next);
-                }
-            }
-        }
-        List<BlockPos> members = new ArrayList<>(seen);
-        members.sort(LOWEST_FIRST);
-        return new Region(family, cluster, members);
-    }
-
-    // The logs that hang from the origin, by the cheapest path of every log to a root.
-    private static Region hangFrom(ServerLevel level, BlockPos origin, Family family) {
-        Set<BlockPos> component = component(level, origin);
+    // The logs that hang from the cut cluster, by the cheapest path of every log to a root. A cut
+    // that would fell more than the most logs one felling may take stages nothing.
+    private static Region hangFrom(ServerLevel level, List<BlockPos> cluster, Family family) {
+        Set<BlockPos> component = component(level, cluster.get(0));
         if (component == null) {
             return none(family);
         }
         Set<BlockPos> roots = roots(level, component);
         Map<BlockPos, BlockPos> parents = new HashMap<>();
         Map<BlockPos, Integer> costs = cheapestPaths(component, roots, parents);
-        if (!costs.containsKey(origin)) {
+        if (!costs.keySet().containsAll(cluster)) {
             return none(family);
         }
-        // A log is felled when its chain of parents reaches the origin through natural logs.
+        // A log is felled when its chain of parents reaches the cluster through natural logs.
         Map<BlockPos, Boolean> hangs = new HashMap<>();
-        hangs.put(origin, true);
+        cluster.forEach(cell -> hangs.put(cell, true));
         List<BlockPos> members = new ArrayList<>();
         for (BlockPos log : component) {
             if (hangsFrom(level, log, parents, hangs)) {
                 members.add(log);
             }
         }
+        if (members.size() > ChoptSettings.MAX_LOGS.get(level.getServer())) {
+            return none(family);
+        }
         members.sort(LOWEST_FIRST);
-        return new Region(family, List.of(origin), members);
+        return new Region(family, cluster, members);
     }
 
     // Every log connected to the origin, or null when the connection runs into an unloaded chunk
