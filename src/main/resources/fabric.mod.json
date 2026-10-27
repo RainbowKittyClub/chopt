@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "${project.mod_id}",
+  "version": "${project.version}",
+
+  "name": "${project.mod_name}",
+  "description": "${project.mod_description}",
+  "authors": ${mod_authors},
+  "contact": {
+    "homepage": "${project.mod_website}",
+    "sources": "${project.mod_website}",
+    "issues": "${project.mod_issues}"
+  },
+
+  "license": "${project.mod_license}",
+
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "${project.entrypoint}"
+    ]
+  },
+  "mixins": [
+    "chopt.mixins.json"
+  ],
+
+  "depends": {
+    "fabricloader": ">=${project.fabric_loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${project.minecraft_version}",
+    "java": ">=${project.java_version}",
+    "polymer-core": "*",
+    "polymer-blocks": "*",
+    "polymer-virtual-entity": "*",
+    "polymer-resource-pack": "*"
+  },
+  "suggests": {
+    "factorytools": "*"
+  }
+}

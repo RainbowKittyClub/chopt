@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "club.rainbowkitty.chopt.mixin",
+  "compatibilityLevel": "JAVA_${project.java_version}",
+  "mixins": [
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

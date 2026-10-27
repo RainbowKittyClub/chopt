@@ -1,0 +1,31 @@
+// chopt's own build logic, applied last by the shared build.gradle.
+
+// The RKC FactoryTools fork publishes to its own GitHub Packages, which the shared build does not
+// read. Same credentials as the shared build's repositories: GITHUB_ACTOR/GITHUB_TOKEN in CI,
+// gpr.user/gpr.key from ~/.gradle/gradle.properties locally.
+repositories {
+    maven {
+        name = 'FactoryToolsFork'
+        url = uri('https://maven.pkg.github.com/RainbowKittyClub/FactoryTools')
+        def githubUser = System.getenv('GITHUB_ACTOR') ?: project.findProperty('gpr.user')
+        def githubToken = System.getenv('GITHUB_TOKEN') ?: project.findProperty('gpr.key')
+        if (githubUser && githubToken) {
+            credentials {
+                username = githubUser
+                password = githubToken
+            }
+        }
+        content {
+            includeModule('eu.pb4', 'factorytools')
+        }
+    }
+}
+
+// Cracks over a felling log compile against the RKC FactoryTools fork's crack API. FactoryTools
+// comes at runtime from ppb's nested jar, so it is neither shipped nor required: fabric.mod.json
+// only suggests it, and stock FactoryTools also meets that without the crack API.
+dependencies {
+    compileOnly("eu.pb4:factorytools:${project.factorytools_version}") {
+        transitive = false
+    }
+}
