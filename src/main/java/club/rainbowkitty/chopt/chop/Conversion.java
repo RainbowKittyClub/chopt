@@ -16,11 +16,13 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import club.rainbowkitty.chopt.Chopt;
 import club.rainbowkitty.chopt.block.FellingLogBlock;
+import club.rainbowkitty.chopt.display.Feedback;
 import club.rainbowkitty.chopt.ledger.Provenance;
 import club.rainbowkitty.chopt.tree.Canopy;
 import club.rainbowkitty.chopt.tree.Family;
 import club.rainbowkitty.chopt.tree.Region;
 import club.rainbowkitty.chopt.tree.Stageable;
+import club.rainbowkitty.chopt.tree.Strip;
 import club.rainbowkitty.chopt.tree.TimeCurve;
 
 /**
@@ -59,6 +61,8 @@ public final class Conversion {
         if (family == Family.QUARTER && !siblingsAgree(level, breaker, region, pos)) {
             return true;
         }
+        // Read while the log is still there: the strip rules look at the block at the position.
+        BlockState stripped = Strip.of(level, pos, state);
         double base = state.getDestroyProgress(breaker, level, pos);
         double m = TimeCurve.m(level.getServer(), region.n());
         int phases = TimeCurve.effectivePhases(family, m, base);
@@ -67,6 +71,7 @@ public final class Conversion {
         } else {
             FellingLogBlock.stage(level, pos, state, family, phases, region.n());
         }
+        Feedback.broke(level, pos, stripped, breaker);
         return false;
     }
 

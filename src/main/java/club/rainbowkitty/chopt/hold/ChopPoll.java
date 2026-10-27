@@ -24,6 +24,7 @@ import club.rainbowkitty.chopt.block.FellingLogBlock;
 import club.rainbowkitty.chopt.block.FellingLogBlockEntity;
 import club.rainbowkitty.chopt.chop.ChopTool;
 import club.rainbowkitty.chopt.chop.Feller;
+import club.rainbowkitty.chopt.display.Feedback;
 import club.rainbowkitty.chopt.mixin.ServerPlayerGameModeAccessor;
 import club.rainbowkitty.chopt.tree.Family;
 import club.rainbowkitty.chopt.tree.Stageable;
@@ -106,6 +107,9 @@ public final class ChopPoll {
                 : Math.min(UNIT, (long) Math.ceil(UNIT * master.phases() * base / rest));
         hold.earn(units, player.getMainHandItem());
         master.setLastHit(now);
+        if (master.stripped() != null && (now - hold.start()) % Feedback.HIT_INTERVAL == 0) {
+            Feedback.hit(level, masterPos, master.stripped());
+        }
         if (now - hold.lastCharge() >= ChoptSettings.CHARGE_MAX_DEFER_TICKS.get(server)) {
             ChopHolds.charge(hold, now);
         }

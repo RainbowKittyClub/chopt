@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import eu.pb4.polymer.core.api.block.PolymerBlock;
+import eu.pb4.polymer.virtualentity.api.BlockWithElementHolder;
+import eu.pb4.polymer.virtualentity.api.ElementHolder;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerBlockEntityEvents;
 import net.fabricmc.fabric.api.networking.v1.context.PacketContext;
 import org.jspecify.annotations.Nullable;
@@ -33,6 +35,8 @@ import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 
 import club.rainbowkitty.chopt.chop.ChopTool;
+import club.rainbowkitty.chopt.display.Feedback;
+import club.rainbowkitty.chopt.display.FellingHolder;
 import club.rainbowkitty.chopt.tree.Family;
 import club.rainbowkitty.chopt.tree.Region;
 import club.rainbowkitty.chopt.tree.Stageable;
@@ -44,7 +48,8 @@ import club.rainbowkitty.chopt.tree.Strip;
  * log it was. A vanilla break of this block gives that log back, so a sneaking player, a bare
  * hand, a tool that cannot chop or another mod breaks it as the plain log it was.
  */
-public class FellingLogBlock extends BarrierBlock implements PolymerBlock, EntityBlock {
+public class FellingLogBlock extends BarrierBlock
+        implements PolymerBlock, EntityBlock, BlockWithElementHolder {
     /** The current phase, from 1; the northwest cell of a quarter group holds the group's. */
     public static final IntegerProperty PHASE = IntegerProperty.create("phase", 1, 15);
     /** The axis the display runs along, which the log's own axis is for a plain log. */
@@ -55,7 +60,7 @@ public class FellingLogBlock extends BarrierBlock implements PolymerBlock, Entit
     private static final ThreadLocal<Pending> PENDING = new ThreadLocal<>();
 
     /** The data a new felling log is built with, handed to its block entity while it is built. */
-    record Pending(BlockPos pos, BlockState original, BlockState stripped, Family family,
+    public record Pending(BlockPos pos, BlockState original, BlockState stripped, Family family,
             int phases, int logsAbove) {}
 
     public FellingLogBlock(Properties properties) {
@@ -135,6 +140,12 @@ public class FellingLogBlock extends BarrierBlock implements PolymerBlock, Entit
         return original.hasProperty(AXIS) ? original.getValue(AXIS) : Direction.Axis.Y;
     }
 
+    /** The data of the conversion staging {@code pos} on this thread, or null. */
+    public static @Nullable Pending pendingAt(BlockPos pos) {
+        Pending pending = PENDING.get();
+        return pending != null && pending.pos().equals(pos) ? pending : null;
+    }
+
     @Override
     protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
         super.createBlockStateDefinition(builder);
@@ -149,6 +160,20 @@ public class FellingLogBlock extends BarrierBlock implements PolymerBlock, Entit
             entity.fill(pending);
         }
         return entity;
+    }
+
+    @Override
+    public @Nullable ElementHolder createElementHolder(ServerLevel level, BlockPos pos,
+            BlockState initialState) {
+        Pending pending = pendingAt(pos);
+        boolean follower = pending != null && pending.family() == Family.QUARTER
+                && Stageable.barkSide(pending.original()) != Stageable.Corner.NORTHWEST;
+        return follower ? null : new FellingHolder(pending);
+    }
+
+    @Override
+    public boolean tickElementHolder(ServerLevel level, BlockPos pos, BlockState initialState) {
+        return true;
     }
 
     @Override
@@ -188,6 +213,9 @@ public class FellingLogBlock extends BarrierBlock implements PolymerBlock, Entit
         if (entity.family() != null && entity.original() != null) {
             entity.setLogsAbove(Region.ofStaged(level, master, entity.family(),
                     entity.original()).n());
+        }
+        if (entity.stripped() != null) {
+            Feedback.broke(level, master, entity.stripped(), null);
         }
         entity.save();
     }
