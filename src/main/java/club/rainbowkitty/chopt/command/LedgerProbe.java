@@ -14,7 +14,6 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
@@ -24,7 +23,6 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import club.rainbowkitty.chopt.ledger.PlacedLogs;
@@ -66,13 +64,8 @@ final class LedgerProbe {
     // The ledger at the block the player looks at.
     private static int atCrosshair(CommandContext<CommandSourceStack> context)
             throws CommandSyntaxException {
-        ServerPlayer player = context.getSource().getPlayerOrException();
-        HitResult hit = player.pick(player.blockInteractionRange(), 1.0F, false);
-        if (!(hit instanceof BlockHitResult block) || hit.getType() != HitResult.Type.BLOCK) {
-            context.getSource().sendFailure(Component.literal("No block in reach"));
-            return 0;
-        }
-        return report(context.getSource(), block.getBlockPos());
+        BlockPos pos = Aim.block(context.getSource());
+        return pos == null ? 0 : report(context.getSource(), pos);
     }
 
     private static int at(CommandContext<CommandSourceStack> context)

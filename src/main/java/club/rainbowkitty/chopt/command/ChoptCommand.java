@@ -30,7 +30,8 @@ public final class ChoptCommand {
                         .then(Commands.literal("probe")
                                 .requires(PERMISSIONS.require("probe", PermissionLevel.GAMEMASTERS))
                                 .executes(ChoptCommand::settings)
-                                .then(LedgerProbe.node()))));
+                                .then(LedgerProbe.node())
+                                .then(TreeProbe.node()))));
     }
 
     // Lists every setting's value as this server reads it.
