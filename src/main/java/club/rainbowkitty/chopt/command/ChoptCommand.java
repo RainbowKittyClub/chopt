@@ -14,8 +14,9 @@ import club.rainbowkitty.chopt.ChoptSettings;
 import club.rainbowkitty.kalic0re.common.command.CommandPermissions;
 
 /**
- * {@code /chopt probe}: what the mod reads, for checking it. Later stages add their own probes
- * under the same literal; Brigadier merges every {@code /chopt} branch.
+ * {@code /chopt probe}: what the mod reads, for checking it. Bare, it lists the settings; each
+ * stage adds a subcommand, starting with {@code ledger}. Brigadier merges every {@code /chopt}
+ * branch.
  */
 public final class ChoptCommand {
     private static final CommandPermissions PERMISSIONS = CommandPermissions.forMod(Chopt.MOD_ID);
@@ -28,7 +29,8 @@ public final class ChoptCommand {
                 dispatcher.register(Commands.literal(Chopt.MOD_ID)
                         .then(Commands.literal("probe")
                                 .requires(PERMISSIONS.require("probe", PermissionLevel.GAMEMASTERS))
-                                .executes(ChoptCommand::settings))));
+                                .executes(ChoptCommand::settings)
+                                .then(LedgerProbe.node()))));
     }
 
     // Lists every setting's value as this server reads it.

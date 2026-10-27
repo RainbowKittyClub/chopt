@@ -4,6 +4,9 @@
   "package": "club.rainbowkitty.chopt.mixin",
   "compatibilityLevel": "JAVA_${project.java_version}",
   "mixins": [
+    "BlockItemMixin",
+    "LevelChunkMixin",
+    "PistonBaseBlockMixin"
   ],
   "injectors": {
     "defaultRequire": 1

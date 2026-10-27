@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import net.minecraft.resources.Identifier;
 
 import club.rainbowkitty.chopt.command.ChoptCommand;
+import club.rainbowkitty.chopt.ledger.PlacedLogs;
 
 /** Mod entrypoint. */
 public class Chopt implements ModInitializer {
@@ -21,6 +22,7 @@ public class Chopt implements ModInitializer {
     @Override
     public void onInitialize() {
         ChoptSettings.register();
+        PlacedLogs.register();
         ChoptCommand.register();
     }
 }
