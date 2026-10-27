@@ -30,4 +30,25 @@ public enum Family {
     public int width(int phase) {
         return fullWidth - 2 * phase;
     }
+
+    /**
+     * The phase shown during stage {@code stage} of a felling that has {@code stages} stages, both
+     * counted from 1. A felling with fewer stages than the family has phases skips some, spread
+     * evenly: the first stage shows the first phase and the last shows the last, so the trunk
+     * still goes from its widest to its thinnest.
+     */
+    public int phaseAt(int stage, int stages) {
+        if (stages <= 1) {
+            return 1;
+        }
+        return 1 + ((stage - 1) * (phases - 1) + (stages - 1) / 2) / (stages - 1);
+    }
+
+    /** The stage during which {@code phase} is shown: the inverse of {@link #phaseAt}. */
+    public int stageAt(int phase, int stages) {
+        if (stages <= 1) {
+            return 1;
+        }
+        return 1 + ((phase - 1) * (stages - 1) + (phases - 1) / 2) / (phases - 1);
+    }
 }

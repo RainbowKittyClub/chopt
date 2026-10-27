@@ -116,13 +116,13 @@ public final class ChopPoll {
     private static void finishPhase(ServerLevel level, ServerPlayer player, BlockPos masterPos,
             FellingLogBlockEntity master, int carried) {
         BlockState state = level.getBlockState(masterPos);
-        int phase = state.getValue(FellingLogBlock.PHASE);
-        if (phase >= master.phases()) {
+        int stage = master.stageAt(state.getValue(FellingLogBlock.PHASE));
+        if (stage >= master.phases()) {
             Feller.fell(level, masterPos, player);
             return;
         }
         int logs = master.logsAbove() + 1;
-        int owed = Durability.shareThrough(logs, phase, master.phases()) - master.paid();
+        int owed = Durability.shareThrough(logs, stage, master.phases()) - master.paid();
         if (owed > 0) {
             master.setPaid(master.paid()
                     + Durability.charge(player, player.getMainHandItem(), owed));

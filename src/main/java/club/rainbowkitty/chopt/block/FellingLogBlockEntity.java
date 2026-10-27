@@ -67,6 +67,19 @@ public final class FellingLogBlockEntity extends BlockEntity {
         return phases;
     }
 
+    /**
+     * The stage the log is in when it shows phase {@code phase}, from 1 to {@link #phases()}. A
+     * felling with every phase is in stage {@code phase}; a shorter one skips phases.
+     */
+    public int stageAt(int phase) {
+        return family == null ? phase : family.stageAt(phase, phases);
+    }
+
+    /** The phase the log shows during stage {@code stage}. */
+    public int phaseAt(int stage) {
+        return family == null ? stage : family.phaseAt(stage, phases);
+    }
+
     /** The unstripped log this was, with its axis; null on a block entity never filled. */
     public @Nullable BlockState original() {
         return original;

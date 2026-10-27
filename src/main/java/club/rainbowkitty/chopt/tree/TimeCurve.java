@@ -21,14 +21,18 @@ public final class TimeCurve {
     }
 
     /**
-     * How many phases a felling of {@code family} goes through at curve value {@code m} and
-     * {@code base} of a vanilla break per tick: all of them, or one when the whole felling is
-     * shorter than the phases would be, so a small tree falls at the first completed phase.
+     * How many stages a felling of {@code family} goes through at curve value {@code m} and
+     * {@code base} of a vanilla break per tick. A stage lasts at least as long as vanilla takes to
+     * break one log with the tool, a whole number of ticks and at least one, so a small tree has
+     * fewer stages than the family has phases and skips some, and the smallest has one. The
+     * tolerance keeps an exact count from rounding down because the tool's speed is a float.
      */
     public static int effectivePhases(Family family, double m, double base) {
         if (base <= 0.0) {
             return family.phases();
         }
-        return (m - 1.0) / base < family.phases() ? 1 : family.phases();
+        double shortest = Math.max(1.0, Math.ceil(1.0 / base - 1.0E-6));
+        int fit = (int) Math.floor((m - 1.0) / base / shortest + 1.0E-6);
+        return Math.max(1, Math.min(family.phases(), fit));
     }
 }

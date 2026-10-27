@@ -74,8 +74,8 @@ final class HoldProbe {
                 instanceof FellingLogBlockEntity log)) {
             return "none";
         }
-        return "at " + master.toShortString() + " phase "
-                + player.level().getBlockState(master).getValue(FellingLogBlock.PHASE) + " of "
+        int phase = player.level().getBlockState(master).getValue(FellingLogBlock.PHASE);
+        return "at " + master.toShortString() + " stage " + log.stageAt(phase) + " of "
                 + log.phases() + ", progress " + log.progressOf(player.getUUID()) + ", paid "
                 + log.paid() + " of " + (log.logsAbove() + 1);
     }

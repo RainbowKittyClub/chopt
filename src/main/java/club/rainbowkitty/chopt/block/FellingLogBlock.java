@@ -295,12 +295,13 @@ public class FellingLogBlock extends BarrierBlock
     }
 
     /**
-     * Moves the log at {@code master} on to its next phase, and counts again the logs it brings
+     * Moves the log at {@code master} on to its next stage, and counts again the logs it brings
      * down, which a branch broken since may have changed.
      */
     public static void advance(ServerLevel level, BlockPos master, FellingLogBlockEntity entity) {
         BlockState state = level.getBlockState(master);
-        level.setBlock(master, state.setValue(PHASE, state.getValue(PHASE) + 1),
+        int stage = entity.stageAt(state.getValue(PHASE));
+        level.setBlock(master, state.setValue(PHASE, entity.phaseAt(stage + 1)),
                 Block.UPDATE_CLIENTS);
         if (entity.family() != null && entity.original() != null) {
             entity.setLogsAbove(Region.ofStaged(level, master, entity.family(),
