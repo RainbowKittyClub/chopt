@@ -6,7 +6,8 @@
   "mixins": [
     "BlockItemMixin",
     "LevelChunkMixin",
-    "PistonBaseBlockMixin"
+    "PistonBaseBlockMixin",
+    "ServerPlayerGameModeAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

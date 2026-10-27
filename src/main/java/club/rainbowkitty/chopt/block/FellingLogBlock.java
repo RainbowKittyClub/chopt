@@ -34,6 +34,7 @@ import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 
 import club.rainbowkitty.chopt.chop.ChopTool;
 import club.rainbowkitty.chopt.tree.Family;
+import club.rainbowkitty.chopt.tree.Region;
 import club.rainbowkitty.chopt.tree.Stageable;
 import club.rainbowkitty.chopt.tree.Strip;
 
@@ -174,6 +175,21 @@ public class FellingLogBlock extends BarrierBlock implements PolymerBlock, Entit
         } else if (entity.family() == Family.QUARTER && !groupIntact(level, pos, entity)) {
             revert(level, pos, entity.original());
         }
+    }
+
+    /**
+     * Moves the log at {@code master} on to its next phase, and counts again the logs it brings
+     * down, which a branch broken since may have changed.
+     */
+    public static void advance(ServerLevel level, BlockPos master, FellingLogBlockEntity entity) {
+        BlockState state = level.getBlockState(master);
+        level.setBlock(master, state.setValue(PHASE, state.getValue(PHASE) + 1),
+                Block.UPDATE_CLIENTS);
+        if (entity.family() != null && entity.original() != null) {
+            entity.setLogsAbove(Region.ofStaged(level, master, entity.family(),
+                    entity.original()).n());
+        }
+        entity.save();
     }
 
     private static void revert(ServerLevel level, BlockPos pos, BlockState plain) {

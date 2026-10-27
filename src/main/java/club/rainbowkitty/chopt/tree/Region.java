@@ -74,6 +74,26 @@ public record Region(Family family, List<BlockPos> cluster, List<BlockPos> membe
         return hangFrom(level, origin, family);
     }
 
+    /**
+     * The region of a log already staged, worked out again from the shape it was staged with:
+     * the staged cells no longer carry a quarter log's bark or a pillar's family, so the shape
+     * comes from {@code family} and the stored {@code original} state.
+     */
+    public static Region ofStaged(ServerLevel level, BlockPos master, Family family,
+            BlockState original) {
+        if (!Provenance.isNatural(level, master)) {
+            return none(family);
+        }
+        Stageable.Corner corner = Stageable.barkSide(original);
+        if (family == Family.QUARTER && corner != null) {
+            return upwardScan(level, Stageable.quarterCells(master, corner), family);
+        }
+        if (family == Family.PILLAR && Stageable.isVertical(original)) {
+            return upwardScan(level, List.of(master), family);
+        }
+        return hangFrom(level, master, family);
+    }
+
     // Breadth first through natural logs from the cluster, 26 neighbours, never below its layer.
     private static Region upwardScan(ServerLevel level, List<BlockPos> cluster, Family family) {
         int cap = ChoptSettings.MAX_LOGS.get(level.getServer());

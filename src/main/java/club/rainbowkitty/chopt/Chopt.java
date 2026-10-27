@@ -8,6 +8,7 @@ import net.minecraft.resources.Identifier;
 
 import club.rainbowkitty.chopt.block.ChoptBlocks;
 import club.rainbowkitty.chopt.command.ChoptCommand;
+import club.rainbowkitty.chopt.hold.ChopPoll;
 import club.rainbowkitty.chopt.ledger.PlacedLogs;
 
 /** Mod entrypoint. */
@@ -25,6 +26,7 @@ public class Chopt implements ModInitializer {
         ChoptSettings.register();
         PlacedLogs.register();
         ChoptBlocks.init();
+        ChopPoll.register();
         ChoptCommand.register();
     }
 }
