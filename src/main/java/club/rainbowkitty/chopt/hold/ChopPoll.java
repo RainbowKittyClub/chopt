@@ -78,14 +78,14 @@ public final class ChopPoll {
         }
         BlockPos target = chops && swinging(player) ? aimedFelling(level, player) : null;
         Hold hold = ChopHolds.of(player);
-        FellingLogBlockEntity master = target == null ? null : masterOf(level, target);
-        if (master == null) {
+        Chopped chopped = target == null ? null : masterOf(level, target);
+        if (chopped == null) {
             if (hold != null) {
                 hold.markQuiet(now);
             }
             return;
         }
-        BlockPos masterPos = masterPos(level, target, master);
+        BlockPos masterPos = chopped.pos();
         if (hold == null || !hold.master().equals(masterPos) || hold.level() != level) {
             ChopHolds.flush(player.getUUID());
             InteractionResult asked = AttackBlockCallback.EVENT.invoker().interact(player, level,
@@ -95,7 +95,7 @@ public final class ChopPoll {
             }
             hold = ChopHolds.start(player, level, masterPos, now);
         }
-        credit(server, player, level, hold, masterPos, master, now);
+        credit(server, player, level, hold, masterPos, chopped.entity(), now);
     }
 
     // Adds one tick of this player's work to the log, and moves it on when a phase is full.
@@ -172,25 +172,25 @@ public final class ChopPoll {
         return null;
     }
 
-    // The block entity of the log, whose progress is the group's for a quarter group's cell.
-    private static FellingLogBlockEntity masterOf(ServerLevel level, BlockPos cell) {
-        if (!(level.getBlockEntity(cell) instanceof FellingLogBlockEntity entity)
-                || entity.original() == null) {
+    // The log whose progress the aimed cell counts toward: the cell itself, or for a quarter group
+    // the northwest cell, found from the aimed cell's own corner; null if it cannot be found.
+    private static Chopped masterOf(ServerLevel level, BlockPos cell) {
+        if (!(level.getBlockEntity(cell) instanceof FellingLogBlockEntity own)
+                || own.original() == null) {
             return null;
         }
-        if (entity.family() != Family.QUARTER) {
-            return entity;
+        if (own.family() != Family.QUARTER) {
+            return new Chopped(cell, own);
         }
-        BlockPos masterPos = masterPos(level, cell, entity);
-        return level.getBlockEntity(masterPos) instanceof FellingLogBlockEntity found
-                ? found : null;
+        Stageable.Corner corner = Stageable.barkSide(own.original());
+        if (corner == null) {
+            return null;
+        }
+        BlockPos northwest = Stageable.quarterCells(cell, corner).get(0);
+        return level.getBlockEntity(northwest) instanceof FellingLogBlockEntity master
+                ? new Chopped(northwest, master) : null;
     }
 
-    // The cell that holds the progress: the log itself, or a quarter group's northwest cell.
-    private static BlockPos masterPos(ServerLevel level, BlockPos cell,
-            FellingLogBlockEntity entity) {
-        Stageable.Corner corner = entity.family() == Family.QUARTER && entity.original() != null
-                ? Stageable.barkSide(entity.original()) : null;
-        return corner == null ? cell : Stageable.quarterCells(cell, corner).get(0);
-    }
+    // A log being chopped, and the cell that holds its progress.
+    private record Chopped(BlockPos pos, FellingLogBlockEntity entity) {}
 }
