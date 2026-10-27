@@ -34,9 +34,11 @@ import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 
+import club.rainbowkitty.chopt.ChoptSettings;
 import club.rainbowkitty.chopt.chop.ChopTool;
 import club.rainbowkitty.chopt.display.Feedback;
 import club.rainbowkitty.chopt.display.FellingHolder;
+import club.rainbowkitty.chopt.hold.ChopHolds;
 import club.rainbowkitty.chopt.tree.Family;
 import club.rainbowkitty.chopt.tree.Region;
 import club.rainbowkitty.chopt.tree.Stageable;
@@ -58,6 +60,8 @@ public class FellingLogBlock extends BarrierBlock
     private static final BlockState BARRIER = Blocks.BARRIER.defaultBlockState();
     private static final BlockState BARRIER_WET = BARRIER.setValue(WATERLOGGED, true);
     private static final ThreadLocal<Pending> PENDING = new ThreadLocal<>();
+    // Ticks between checks of a felling log that is not yet idle long enough to revert.
+    private static final long IDLE_RECHECK = 200L;
 
     /** The data a new felling log is built with, handed to its block entity while it is built. */
     public record Pending(BlockPos pos, BlockState original, BlockState stripped, Family family,
@@ -94,6 +98,10 @@ public class FellingLogBlock extends BarrierBlock
             level.setBlock(pos, felling, Block.UPDATE_ALL);
         } finally {
             PENDING.remove();
+        }
+        if (level.getServer() != null
+                && level.getBlockEntity(pos) instanceof FellingLogBlockEntity entity) {
+            entity.setLastHit(level.getServer().getTickCount());
         }
     }
 
@@ -186,6 +194,55 @@ public class FellingLogBlock extends BarrierBlock
     @Override
     protected void tick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
         validate(level, pos, state);
+        if (level.getBlockState(pos).getBlock() == this) {
+            checkIdle(level, pos, level.getBlockState(pos));
+        }
+    }
+
+    // A felling log nobody has worked on for a while, and has cost nobody anything, is a plain log
+    // again. A log that was charged for stays staged, so an abandoned chop is not charged twice.
+    private void checkIdle(ServerLevel level, BlockPos pos, BlockState state) {
+        if (!(level.getBlockEntity(pos) instanceof FellingLogBlockEntity entity)
+                || entity.original() == null) {
+            return;
+        }
+        BlockPos master = pos;
+        FellingLogBlockEntity owner = entity;
+        Stageable.Corner corner = entity.family() == Family.QUARTER
+                ? Stageable.barkSide(entity.original()) : null;
+        if (corner != null) {
+            master = Stageable.quarterCells(pos, corner).get(0);
+            if (level.getBlockEntity(master) instanceof FellingLogBlockEntity found) {
+                owner = found;
+            }
+        }
+        long now = level.getServer().getTickCount();
+        if (owner.lastHit() > now) {
+            owner.setLastHit(now);
+        }
+        int idle = ChoptSettings.IDLE_REVERT_TICKS.get(level.getServer());
+        long quiet = now - owner.lastHit();
+        if (quiet >= idle && owner.paid() == 0 && !ChopHolds.heldOn(level, master)) {
+            revert(level, pos, entity.original());
+        } else {
+            long wait = Math.max(20L, Math.min(idle - quiet, IDLE_RECHECK));
+            level.scheduleTick(pos, this, (int) wait);
+        }
+    }
+
+    // When a felling log goes, the cells of its quarter group that stay check themselves at once.
+    @Override
+    protected void affectNeighborsAfterRemoval(BlockState state, ServerLevel level, BlockPos pos,
+            boolean movedByPiston) {
+        super.affectNeighborsAfterRemoval(state, level, pos, movedByPiston);
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                BlockPos near = pos.offset(dx, 0, dz);
+                if ((dx != 0 || dz != 0) && level.getBlockState(near).getBlock() == this) {
+                    level.scheduleTick(near, this, 1);
+                }
+            }
+        }
     }
 
     /**

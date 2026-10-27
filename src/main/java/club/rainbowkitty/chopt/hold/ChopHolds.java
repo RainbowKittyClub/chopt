@@ -55,6 +55,16 @@ public final class ChopHolds {
         }
     }
 
+    /** Whether any player's hold is on the log at {@code master}. */
+    public static boolean heldOn(ServerLevel level, BlockPos master) {
+        for (Hold hold : HOLDS.values()) {
+            if (hold.level() == level && hold.master().equals(master)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Flushes every hold; used when the server stops. */
     public static void flushAll() {
         for (UUID player : new ArrayList<>(HOLDS.keySet())) {
