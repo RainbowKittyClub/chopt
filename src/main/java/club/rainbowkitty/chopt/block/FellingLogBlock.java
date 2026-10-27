@@ -2,11 +2,14 @@ package club.rainbowkitty.chopt.block;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 import eu.pb4.polymer.core.api.block.PolymerBlock;
 import eu.pb4.polymer.virtualentity.api.BlockWithElementHolder;
 import eu.pb4.polymer.virtualentity.api.ElementHolder;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerBlockEntityEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.context.PacketContext;
 import org.jspecify.annotations.Nullable;
 
@@ -18,6 +21,7 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.BarrierBlock;
@@ -60,8 +64,14 @@ public class FellingLogBlock extends BarrierBlock
     private static final BlockState BARRIER = Blocks.BARRIER.defaultBlockState();
     private static final BlockState BARRIER_WET = BARRIER.setValue(WATERLOGGED, true);
     private static final ThreadLocal<Pending> PENDING = new ThreadLocal<>();
+    private static final Queue<Awaiting> AWAITING_LOAD = new ConcurrentLinkedQueue<>();
+    // How many ticks a loaded log waits for its chunk to tick before it is left to its idle check.
+    private static final int MAX_LOAD_WAIT = 600;
     // Ticks between checks of a felling log that is not yet idle long enough to revert.
     private static final long IDLE_RECHECK = 200L;
+
+    // A loaded felling log whose chunk is not ticking yet.
+    private record Awaiting(ServerLevel level, BlockPos pos, int tries) {}
 
     /** The data a new felling log is built with, handed to its block entity while it is built. */
     public record Pending(BlockPos pos, BlockState original, BlockState stripped, Family family,
@@ -73,13 +83,39 @@ public class FellingLogBlock extends BarrierBlock
                 .setValue(AXIS, Direction.Axis.Y));
     }
 
-    /** Checks every felling log a chunk loads, which a crash or an edit may have left unsound. */
+    /**
+     * Checks every felling log a chunk loads, which a crash or an edit may have left unsound. The
+     * chunk is not ticking yet when its block entities load, and vanilla refuses a scheduled tick
+     * there, so each waits in a queue until its chunk is.
+     */
     public static void register() {
         ServerBlockEntityEvents.BLOCK_ENTITY_LOAD.register((entity, level) -> {
             if (entity instanceof FellingLogBlockEntity) {
-                level.scheduleTick(entity.getBlockPos(), ChoptBlocks.FELLING_LOG, 1);
+                AWAITING_LOAD.add(new Awaiting(level, entity.getBlockPos(), 0));
             }
         });
+        ServerTickEvents.END_SERVER_TICK.register(server -> admitLoaded());
+    }
+
+    // Schedules the check of every queued log whose chunk now ticks, and asks again next tick of
+    // the rest, for a while: a chunk that never ticks (nobody near) is checked when it does, by
+    // the idle tick the log keeps anyway.
+    private static void admitLoaded() {
+        for (int waiting = AWAITING_LOAD.size(); waiting > 0; waiting--) {
+            Awaiting next = AWAITING_LOAD.poll();
+            if (next == null || !next.level().hasChunkAt(next.pos())) {
+                continue;
+            }
+            BlockState there = next.level().getBlockState(next.pos());
+            if (there.getBlock() != ChoptBlocks.FELLING_LOG) {
+                continue;
+            }
+            if (next.level().isPositionTickingWithEntitiesLoaded(ChunkPos.pack(next.pos()))) {
+                next.level().scheduleTick(next.pos(), ChoptBlocks.FELLING_LOG, 1);
+            } else if (next.tries() < MAX_LOAD_WAIT) {
+                AWAITING_LOAD.add(new Awaiting(next.level(), next.pos(), next.tries() + 1));
+            }
+        }
     }
 
     /**
