@@ -20,6 +20,7 @@ public final class Hold {
     private long credit;
     private int paid;
     private long quietSince = -1L;
+    private long lastCharge;
 
     Hold(UUID player, ServerLevel level, BlockPos master, ItemStack tool, long start) {
         this.player = player;
@@ -27,6 +28,7 @@ public final class Hold {
         this.master = master;
         this.tool = tool;
         this.start = start;
+        this.lastCharge = start;
     }
 
     /** The player whose hold this is. */
@@ -81,7 +83,13 @@ public final class Hold {
         return quietSince;
     }
 
-    void addPaid(int blocks) {
+    void addPaid(int blocks, long now) {
         this.paid += blocks;
+        this.lastCharge = now;
+    }
+
+    /** The tick this hold last paid anything, or began. */
+    public long lastCharge() {
+        return lastCharge;
     }
 }

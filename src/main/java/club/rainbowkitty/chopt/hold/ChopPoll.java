@@ -45,16 +45,16 @@ public final class ChopPoll {
     /** Hooks the poll and the events that end a hold. */
     public static void register() {
         ServerTickEvents.END_SERVER_TICK.register(ChopPoll::tick);
-        ServerPlayerEvents.LEAVE.register(player -> ChopHolds.end(player.getUUID()));
+        ServerPlayerEvents.LEAVE.register(player -> ChopHolds.flush(player.getUUID()));
         ServerPlayerEvents.AFTER_RESPAWN.register((old, player, alive) ->
-                ChopHolds.end(old.getUUID()));
+                ChopHolds.flush(old.getUUID()));
         ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, damage) -> {
             if (entity instanceof ServerPlayer player) {
-                ChopHolds.end(player.getUUID());
+                ChopHolds.flush(player.getUUID());
             }
             return true;
         });
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> ChopHolds.endAll());
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> ChopHolds.flushAll());
     }
 
     private static void tick(MinecraftServer server) {
@@ -67,6 +67,10 @@ public final class ChopPoll {
 
     private static void visit(MinecraftServer server, ServerPlayer player, long now) {
         ServerLevel level = player.level();
+        Hold held = ChopHolds.of(player);
+        if (held != null && hardStop(player, held, level)) {
+            ChopHolds.flush(player.getUUID());
+        }
         boolean chops = player.isAlive() && ChopTool.chops(player);
         if (chops) {
             clearVanillaMining(player, level);
@@ -82,7 +86,7 @@ public final class ChopPoll {
         }
         BlockPos masterPos = masterPos(level, target, master);
         if (hold == null || !hold.master().equals(masterPos) || hold.level() != level) {
-            ChopHolds.end(player.getUUID());
+            ChopHolds.flush(player.getUUID());
             InteractionResult asked = AttackBlockCallback.EVENT.invoker().interact(player, level,
                     InteractionHand.MAIN_HAND, target, Direction.UP);
             if (asked == InteractionResult.FAIL) {
@@ -102,6 +106,9 @@ public final class ChopPoll {
                 : Math.min(UNIT, (long) Math.ceil(UNIT * master.phases() * base / rest));
         hold.earn(units, player.getMainHandItem());
         master.setLastHit(now);
+        if (now - hold.lastCharge() >= ChoptSettings.CHARGE_MAX_DEFER_TICKS.get(server)) {
+            ChopHolds.charge(hold, now);
+        }
         master.setProgress((int) Math.min(master.progress() + units, 2L * UNIT - 1));
         if (master.progress() < UNIT) {
             return;
@@ -126,6 +133,13 @@ public final class ChopPoll {
         if (mode.chopt$isDestroyingBlock() && isFelling(level, mode.chopt$destroyPos())) {
             mode.chopt$setDestroyingBlock(false);
         }
+    }
+
+    // A stop that cannot wait for the grace period: the tool is no longer the one in hand, the
+    // player left the level, died or is out of survival, or the log is gone.
+    private static boolean hardStop(ServerPlayer player, Hold hold, ServerLevel level) {
+        return !player.isAlive() || hold.level() != level || !player.gameMode.isSurvival()
+                || player.getMainHandItem() != hold.tool() || !isFelling(level, hold.master());
     }
 
     private static boolean isFelling(ServerLevel level, BlockPos pos) {
