@@ -22,14 +22,16 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import club.rainbowkitty.chopt.block.FellingLogBlock;
+import club.rainbowkitty.chopt.block.FellingLogBlockEntity;
 import club.rainbowkitty.chopt.chop.ChopTool;
-import club.rainbowkitty.chopt.hold.ChopHolds;
-import club.rainbowkitty.chopt.hold.Hold;
+import club.rainbowkitty.chopt.hold.ChopPoll;
 
 /**
- * {@code /chopt probe hold <player>}: whether the player chops and what their hold on a log has
- * earned; {@code ask <player> <pos>} says what the attack-block event answers for them there,
- * which is the question a claim mod is asked when a hold begins.
+ * {@code /chopt probe hold <player>}: whether the player chops and, for the felling log they
+ * aim at, how far they have come through its phase and what the tool has paid;
+ * {@code ask <player> <pos>} says what the attack-block event answers for them there, which is the
+ * question a claim mod is asked when a chop begins.
  */
 final class HoldProbe {
     private HoldProbe() {}
@@ -47,7 +49,6 @@ final class HoldProbe {
     private static int show(CommandContext<CommandSourceStack> context)
             throws CommandSyntaxException {
         ServerPlayer player = EntityArgument.getPlayer(context, "player");
-        Hold hold = ChopHolds.of(player);
         Vec3 eye = player.getEyePosition();
         Vec3 end = eye.add(player.getLookAngle().scale(player.blockInteractionRange()));
         BlockHitResult hit = player.level().clip(new ClipContext(eye, end,
@@ -56,11 +57,27 @@ final class HoldProbe {
                 + BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(hit.getBlockPos())
                         .getBlock()) : "nothing";
         String line = "chops " + ChopTool.chops(player) + ", swinging "
-                + swinging(player) + ", ray hits " + ray + ", hold "
-                + (hold == null ? "none" : "on " + hold.master().toShortString() + ", credit "
-                + hold.credit() + ", paid " + hold.paid() + ", quiet since " + hold.quietSince());
+                + swinging(player) + ", ray hits " + ray + ", log " + progress(player, hit);
         context.getSource().sendSuccess(() -> Component.literal(line), false);
         return Command.SINGLE_SUCCESS;
+    }
+
+    // The player's own progress on the felling log the ray hits, or none.
+    private static String progress(ServerPlayer player, BlockHitResult hit) {
+        if (hit.getType() != HitResult.Type.BLOCK
+                || !(player.level().getBlockState(hit.getBlockPos()).getBlock()
+                        instanceof FellingLogBlock)) {
+            return "none";
+        }
+        BlockPos master = ChopPoll.masterPosOf(player.level(), hit.getBlockPos());
+        if (master == null || !(player.level().getBlockEntity(master)
+                instanceof FellingLogBlockEntity log)) {
+            return "none";
+        }
+        return "at " + master.toShortString() + " phase "
+                + player.level().getBlockState(master).getValue(FellingLogBlock.PHASE) + " of "
+                + log.phases() + ", progress " + log.progressOf(player.getUUID()) + ", paid "
+                + log.paid() + " of " + (log.logsAbove() + 1);
     }
 
     // Whether the player is mid-swing, which is what the poll counts as chopping.

@@ -42,7 +42,6 @@ import club.rainbowkitty.chopt.ChoptSettings;
 import club.rainbowkitty.chopt.chop.ChopTool;
 import club.rainbowkitty.chopt.display.Feedback;
 import club.rainbowkitty.chopt.display.FellingHolder;
-import club.rainbowkitty.chopt.hold.ChopHolds;
 import club.rainbowkitty.chopt.tree.Family;
 import club.rainbowkitty.chopt.tree.Region;
 import club.rainbowkitty.chopt.tree.Stageable;
@@ -258,7 +257,7 @@ public class FellingLogBlock extends BarrierBlock
         }
         int idle = ChoptSettings.IDLE_REVERT_TICKS.get(level.getServer());
         long quiet = now - owner.lastHit();
-        if (quiet >= idle && owner.paid() == 0 && !ChopHolds.heldOn(level, master)) {
+        if (quiet >= idle && owner.paid() == 0) {
             revert(level, pos, entity.original());
         } else {
             long wait = Math.max(20L, Math.min(idle - quiet, IDLE_RECHECK));

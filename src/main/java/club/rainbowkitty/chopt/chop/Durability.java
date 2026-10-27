@@ -14,6 +14,15 @@ public final class Durability {
     private Durability() {}
 
     /**
+     * The blocks of a tree of {@code logs} that have been paid for once {@code phase} of
+     * {@code phases} is complete. The wear is spread over the phases in whole blocks, rounding
+     * the running total down, so the last phase leaves exactly the tree's whole count.
+     */
+    public static int shareThrough(int logs, int phase, int phases) {
+        return (int) ((long) logs * phase / phases);
+    }
+
+    /**
      * Charges {@code tool} for {@code blocks} logs and returns how many it covered. A tool with
      * less durability left than that is used up and covers what it had; a tool the player no longer
      * carries, or one that wears no more, covers all of them for nothing.

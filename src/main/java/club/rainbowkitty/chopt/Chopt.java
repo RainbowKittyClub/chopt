@@ -8,6 +8,7 @@ import net.minecraft.resources.Identifier;
 
 import club.rainbowkitty.chopt.block.ChoptBlocks;
 import club.rainbowkitty.chopt.chop.Conversion;
+import club.rainbowkitty.chopt.chop.Falls;
 import club.rainbowkitty.chopt.command.ChoptCommand;
 import club.rainbowkitty.chopt.hold.ChopPoll;
 import club.rainbowkitty.chopt.ledger.PlacedLogs;
@@ -28,6 +29,7 @@ public class Chopt implements ModInitializer {
         PlacedLogs.register();
         ChoptBlocks.init();
         Conversion.register();
+        Falls.register();
         ChopPoll.register();
         ChoptCommand.register();
     }

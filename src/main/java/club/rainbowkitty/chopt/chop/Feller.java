@@ -1,6 +1,5 @@
 package club.rainbowkitty.chopt.chop;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
@@ -18,14 +17,14 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import club.rainbowkitty.chopt.block.FellingLogBlock;
 import club.rainbowkitty.chopt.block.FellingLogBlockEntity;
-import club.rainbowkitty.chopt.hold.ChopHolds;
+import club.rainbowkitty.chopt.display.Feedback;
 import club.rainbowkitty.chopt.tree.Region;
 import club.rainbowkitty.chopt.tree.Stageable;
 
 /**
- * Brings a tree down when its last phase completes: settles what the tools owe, then removes the
- * cut log and every log that hangs from it, lowest first. Each log asks the break event first, so a
- * claim can refuse it, and a log whose tool could not pay for it stays.
+ * Brings a tree down when its last phase completes: settles what the tool still owes, then has
+ * {@link Falls} remove the cut log and every log that hangs from it, lowest first. Each log asks
+ * the break event first, so a claim can refuse it, and a log whose tool could not pay for it stays.
  */
 public final class Feller {
     // What vanilla charges in hunger for each block a player breaks.
@@ -34,9 +33,9 @@ public final class Feller {
     private Feller() {}
 
     /**
-     * The last phase of the log at {@code master} has been completed by {@code finisher}. Every
-     * hold on it is charged its share, the finisher pays the rest, and the logs fall as far as the
-     * durability paid for them goes.
+     * The last phase of the log at {@code master} has been completed by {@code finisher}. The
+     * phases before it have each been paid by whoever completed them, the finisher pays the rest,
+     * and the logs fall as far as the durability paid for them goes.
      */
     public static void fell(ServerLevel level, BlockPos master, ServerPlayer finisher) {
         if (!(level.getBlockEntity(master) instanceof FellingLogBlockEntity log)
@@ -49,33 +48,17 @@ public final class Feller {
         ItemStack tool = finisher.getMainHandItem();
         Item toolItem = tool.getItem();
 
-        // Counted again now, so what the holds pay is judged against the tree as it stands.
+        // Counted again now, so what is owed is judged against the tree as it stands.
         log.setLogsAbove(members.size() - 1);
-        ChopHolds.flushOn(level, master);
         int nested = nestedPaid(level, members, cluster);
-        // A tool the holds' share used up has paid all it had: the rest is not its to fell.
+        // A finisher with nothing in hand pays nothing, and the rest is not theirs to fell.
         int top = Math.max(0, members.size() - log.paid() - nested);
         if (!tool.isEmpty()) {
             log.setPaid(log.paid() + Durability.charge(finisher, tool, top));
         }
         int allowed = Math.max(cluster.size(), Math.min(members.size(), log.paid() + nested));
 
-        List<BlockPos> order = new ArrayList<>(cluster);
-        members.stream().filter(pos -> !cluster.contains(pos)).forEach(order::add);
-        Cascade.run(() -> {
-            int felled = 0;
-            for (BlockPos pos : order) {
-                if (felled >= allowed) {
-                    break;
-                }
-                if (remove(level, finisher, tool, pos)) {
-                    felled++;
-                }
-            }
-            for (BlockPos pos : cluster) {
-                restore(level, pos);
-            }
-        });
+        Falls.start(level, finisher, tool, cluster, members, allowed);
         finisher.awardStat(Stats.ITEM_USED.get(toolItem));
     }
 
@@ -94,10 +77,11 @@ public final class Feller {
         return paid;
     }
 
-    // Removes one log as a break would: the event may refuse it, then its drops, the block, the
-    // fluid it held, the event again and the statistics. Returns whether it fell.
-    private static boolean remove(ServerLevel level, ServerPlayer breaker, ItemStack tool,
-            BlockPos pos) {
+    // Removes one log as a break would: the event may refuse it, then the break effect, its drops,
+    // the block, the fluid it held, the event again and the statistics. The effect is the sound and
+    // chips of a break, or only the chips when {@code sound} is false. Returns whether it fell.
+    static boolean remove(ServerLevel level, ServerPlayer breaker, ItemStack tool, BlockPos pos,
+            boolean sound) {
         BlockState state = level.getBlockState(pos);
         if (!state.is(BlockTags.LOGS)) {
             return false;
@@ -111,8 +95,15 @@ public final class Feller {
             return false;
         }
         Block mined = state.getBlock();
+        BlockState shown = state;
         if (entity instanceof FellingLogBlockEntity log) {
             mined = log.originalOrOak().getBlock();
+            shown = log.stripped() != null ? log.stripped() : log.originalOrOak();
+        }
+        if (sound) {
+            Feedback.broke(level, pos, shown, null);
+        } else {
+            Feedback.chips(level, pos, shown, Feedback.FALL_CHIPS);
         }
         Block.dropResources(state, level, pos, entity, breaker, tool);
         level.setBlock(pos, state.getFluidState().createLegacyBlock(), Block.UPDATE_ALL);
@@ -138,7 +129,7 @@ public final class Feller {
     }
 
     // Puts a cut cell that did not fall back as the log it was, so it does not wait forever.
-    private static void restore(ServerLevel level, BlockPos pos) {
+    static void restore(ServerLevel level, BlockPos pos) {
         if (level.getBlockState(pos).getBlock() instanceof FellingLogBlock
                 && level.getBlockEntity(pos) instanceof FellingLogBlockEntity log) {
             level.setBlock(pos, log.originalOrOak(), Block.UPDATE_ALL);

@@ -2,17 +2,13 @@
   "gamerule.chopt.max_logs": "Maximum Logs Per Tree",
   "gamerule.chopt.max_logs.description": "Most logs one felling may take down; a larger tree is not staged",
   "gamerule.chopt.scan_cap": "Hang-From Scan Cap",
-  "gamerule.chopt.scan_cap.description": "Most connected logs the scan of a horizontal log or small log visits before it gives up",
+  "gamerule.chopt.scan_cap.description": "Most connected logs the scan of a cut visits before it gives up",
   "gamerule.chopt.curve_linear_hundredths": "Time Curve, Linear Term",
   "gamerule.chopt.curve_linear_hundredths.description": "Hundredths of a vanilla break added per log above the cut",
   "gamerule.chopt.curve_logarithmic_weight": "Time Curve, Logarithmic Weight",
   "gamerule.chopt.curve_logarithmic_weight.description": "Vanilla breaks added per natural log of the logs above the cut",
   "gamerule.chopt.curve_cap": "Time Curve, Cap",
   "gamerule.chopt.curve_cap.description": "Most vanilla breaks a felling may take however large the tree",
-  "gamerule.chopt.charge_grace_ticks": "Durability Charge Grace",
-  "gamerule.chopt.charge_grace_ticks.description": "Ticks without chopping before the durability owed so far is charged",
-  "gamerule.chopt.charge_max_defer_ticks": "Durability Charge Deadline",
-  "gamerule.chopt.charge_max_defer_ticks.description": "Ticks after which the durability owed is charged even if chopping never stops",
   "gamerule.chopt.idle_revert_ticks": "Idle Revert Time",
   "gamerule.chopt.idle_revert_ticks.description": "Ticks an untouched, unpaid felling log waits before it reverts to a plain log"
 }

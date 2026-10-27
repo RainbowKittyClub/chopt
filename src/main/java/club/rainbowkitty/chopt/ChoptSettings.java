@@ -24,8 +24,8 @@ public final class ChoptSettings {
     public static final Setting<Integer> MAX_LOGS = range("max_logs", 256, 1, 4096);
 
     /**
-     * Most logs the hang-from scan visits before it gives up. A horizontal pillar or small log
-     * whose connected logs exceed this stages nothing.
+     * Most logs the hang-from scan visits before it gives up. A cut whose connected logs exceed
+     * this stages nothing.
      */
     public static final Setting<Integer> SCAN_CAP = range("scan_cap", 2048, 1, 65536);
 
@@ -42,17 +42,6 @@ public final class ChoptSettings {
 
     /** The time curve's ceiling, in vanilla breaks, so a huge tree is never longer than this. */
     public static final Setting<Integer> CURVE_CAP = range("curve_cap", 32, 2, 1000);
-
-    /**
-     * Ticks a player may go without earning chop credit before the durability owed so far is
-     * charged. A shorter grace charges sooner after the player lets go.
-     */
-    public static final Setting<Integer> CHARGE_GRACE_TICKS =
-            range("charge_grace_ticks", 10, 0, 200);
-
-    /** Ticks after which the durability owed is charged even if the player never stops. */
-    public static final Setting<Integer> CHARGE_MAX_DEFER_TICKS =
-            range("charge_max_defer_ticks", 1200, 20, 72000);
 
     /**
      * Ticks a felling log may sit untouched before it reverts to the log it was, when nothing

@@ -1,10 +1,13 @@
 package club.rainbowkitty.chopt.hold;
 
-import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
+import org.jspecify.annotations.Nullable;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -19,10 +22,10 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
-import club.rainbowkitty.chopt.ChoptSettings;
 import club.rainbowkitty.chopt.block.FellingLogBlock;
 import club.rainbowkitty.chopt.block.FellingLogBlockEntity;
 import club.rainbowkitty.chopt.chop.ChopTool;
+import club.rainbowkitty.chopt.chop.Durability;
 import club.rainbowkitty.chopt.chop.Feller;
 import club.rainbowkitty.chopt.display.Feedback;
 import club.rainbowkitty.chopt.mixin.ServerPlayerGameModeAccessor;
@@ -33,29 +36,26 @@ import club.rainbowkitty.chopt.tree.TimeCurve;
 /**
  * Advances every chop once a tick. A player chops while they are swinging at a felling log within
  * reach: vanilla's own hold flags cannot say so, since after a client-predicted break the client
- * sends no new start and keeps punching. Each chopping player adds to the log's progress in
- * proportion to how fast their tool breaks it, and the log moves to its next phase, or falls, when
- * a phase is full.
+ * sends no new start and keeps punching. Each chopping player works through the current phase on
+ * their own, at the rate their tool breaks the log. The first to fill it moves the log to its next
+ * phase, or fells the tree, and pays that phase's share of the tool's wear; nobody else's work on
+ * that phase counts for anything.
  */
 public final class ChopPoll {
     /** One phase, in the fixed-point units progress is kept in. */
     public static final int UNIT = 65536;
 
+    // Ticks a player may look away from a log and come back to it without being asked again.
+    private static final int CONTINUE_TICKS = 10;
+
+    private static final Map<UUID, Chop> CHOPS = new HashMap<>();
+
     private ChopPoll() {}
 
-    /** Hooks the poll and the events that end a hold. */
+    /** Hooks the poll and the event that forgets a player who leaves. */
     public static void register() {
         ServerTickEvents.END_SERVER_TICK.register(ChopPoll::tick);
-        ServerPlayerEvents.LEAVE.register(player -> ChopHolds.flush(player.getUUID()));
-        ServerPlayerEvents.AFTER_RESPAWN.register((old, player, alive) ->
-                ChopHolds.flush(old.getUUID()));
-        ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, damage) -> {
-            if (entity instanceof ServerPlayer player) {
-                ChopHolds.flush(player.getUUID());
-            }
-            return true;
-        });
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> ChopHolds.flushAll());
+        ServerPlayerEvents.LEAVE.register(player -> CHOPS.remove(player.getUUID()));
     }
 
     private static void tick(MinecraftServer server) {
@@ -63,67 +63,72 @@ public final class ChopPoll {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             visit(server, player, now);
         }
-        ChopHolds.expire(now, ChoptSettings.CHARGE_GRACE_TICKS.get(server));
     }
 
     private static void visit(MinecraftServer server, ServerPlayer player, long now) {
         ServerLevel level = player.level();
-        Hold held = ChopHolds.of(player);
-        if (held != null && hardStop(player, held, level)) {
-            ChopHolds.flush(player.getUUID());
-        }
         boolean chops = player.isAlive() && ChopTool.chops(player);
         if (chops) {
             clearVanillaMining(player, level);
         }
         BlockPos target = chops && swinging(player) ? aimedFelling(level, player) : null;
-        Hold hold = ChopHolds.of(player);
         Chopped chopped = target == null ? null : masterOf(level, target);
         if (chopped == null) {
-            if (hold != null) {
-                hold.markQuiet(now);
-            }
             return;
         }
         BlockPos masterPos = chopped.pos();
-        if (hold == null || !hold.master().equals(masterPos) || hold.level() != level) {
-            ChopHolds.flush(player.getUUID());
-            InteractionResult asked = AttackBlockCallback.EVENT.invoker().interact(player, level,
-                    InteractionHand.MAIN_HAND, target, Direction.UP);
-            if (asked == InteractionResult.FAIL) {
-                return;
-            }
-            hold = ChopHolds.start(player, level, masterPos, now);
+        Chop last = CHOPS.get(player.getUUID());
+        boolean continuing = last != null && last.level() == level
+                && last.master().equals(masterPos) && now - last.tick() <= CONTINUE_TICKS;
+        if (!continuing && AttackBlockCallback.EVENT.invoker().interact(player, level,
+                InteractionHand.MAIN_HAND, target, Direction.UP) == InteractionResult.FAIL) {
+            return;
         }
-        credit(server, player, level, hold, masterPos, chopped.entity(), now);
+        CHOPS.put(player.getUUID(), new Chop(level, masterPos, now));
+        credit(server, player, level, masterPos, chopped.entity(), now);
     }
 
-    // Adds one tick of this player's work to the log, and moves it on when a phase is full.
+    // Adds one tick of this player's work to their own progress on the log, and finishes the phase
+    // if that fills it.
     private static void credit(MinecraftServer server, ServerPlayer player, ServerLevel level,
-            Hold hold, BlockPos masterPos, FellingLogBlockEntity master, long now) {
+            BlockPos masterPos, FellingLogBlockEntity master, long now) {
         double base = master.originalOrOak().getDestroyProgress(player, level, masterPos);
         double rest = TimeCurve.m(server, master.logsAbove()) - 1.0;
         long units = base <= 0.0 ? 0L : rest <= 0.0 ? UNIT
                 : Math.min(UNIT, (long) Math.ceil(UNIT * master.phases() * base / rest));
-        hold.earn(units, player.getMainHandItem());
         master.setLastHit(now);
-        if (master.stripped() != null && (now - hold.start()) % Feedback.HIT_INTERVAL == 0) {
+        if (master.stripped() != null && now % Feedback.HIT_INTERVAL == 0) {
             Feedback.hit(level, masterPos, master.stripped());
         }
-        if (now - hold.lastCharge() >= ChoptSettings.CHARGE_MAX_DEFER_TICKS.get(server)) {
-            ChopHolds.charge(hold, now);
-        }
-        master.setProgress((int) Math.min(master.progress() + units, 2L * UNIT - 1));
-        if (master.progress() < UNIT) {
+        UUID id = player.getUUID();
+        long total = master.progressOf(id) + units;
+        if (total < UNIT) {
+            master.setProgressOf(id, (int) total);
+            master.save();
             return;
         }
+        finishPhase(level, player, masterPos, master, (int) Math.min(total - UNIT, UNIT - 1));
+    }
+
+    // The player has filled the phase: they pay its share of the wear, and the log moves on with
+    // everyone's progress cleared but the part of theirs that ran past the end. The last phase
+    // fells the tree, where the finisher pays what is left.
+    private static void finishPhase(ServerLevel level, ServerPlayer player, BlockPos masterPos,
+            FellingLogBlockEntity master, int carried) {
         BlockState state = level.getBlockState(masterPos);
-        if (state.getValue(FellingLogBlock.PHASE) < master.phases()) {
-            master.setProgress(master.progress() - UNIT);
-            FellingLogBlock.advance(level, masterPos, master);
-        } else {
+        int phase = state.getValue(FellingLogBlock.PHASE);
+        if (phase >= master.phases()) {
             Feller.fell(level, masterPos, player);
+            return;
         }
+        int logs = master.logsAbove() + 1;
+        int owed = Durability.shareThrough(logs, phase, master.phases()) - master.paid();
+        if (owed > 0) {
+            master.setPaid(master.paid()
+                    + Durability.charge(player, player.getMainHandItem(), owed));
+        }
+        master.startNextPhase(player.getUUID(), carried);
+        FellingLogBlock.advance(level, masterPos, master);
     }
 
     // A player chopping a felling log must not leave vanilla's mining flags pointing at it:
@@ -137,13 +142,6 @@ public final class ChopPoll {
         if (mode.chopt$isDestroyingBlock() && isFelling(level, mode.chopt$destroyPos())) {
             mode.chopt$setDestroyingBlock(false);
         }
-    }
-
-    // A stop that cannot wait for the grace period: the tool is no longer the one in hand, the
-    // player left the level, died or is out of survival, or the log is gone.
-    private static boolean hardStop(ServerPlayer player, Hold hold, ServerLevel level) {
-        return !player.isAlive() || hold.level() != level || !player.gameMode.isSurvival()
-                || player.getMainHandItem() != hold.tool() || !isFelling(level, hold.master());
     }
 
     private static boolean isFelling(ServerLevel level, BlockPos pos) {
@@ -172,8 +170,17 @@ public final class ChopPoll {
         return null;
     }
 
-    // The log whose progress the aimed cell counts toward: the cell itself, or for a quarter group
-    // the northwest cell, found from the aimed cell's own corner; null if it cannot be found.
+    /**
+     * The cell whose block entity holds the progress of the log that the felling cell {@code cell}
+     * belongs to: the cell itself, or for a quarter group the northwest cell, found from the
+     * cell's own corner. Null if it cannot be found.
+     */
+    public static @Nullable BlockPos masterPosOf(ServerLevel level, BlockPos cell) {
+        Chopped chopped = masterOf(level, cell);
+        return chopped == null ? null : chopped.pos();
+    }
+
+    // The log whose progress the aimed cell counts toward, or null.
     private static Chopped masterOf(ServerLevel level, BlockPos cell) {
         if (!(level.getBlockEntity(cell) instanceof FellingLogBlockEntity own)
                 || own.original() == null) {
@@ -193,4 +200,7 @@ public final class ChopPoll {
 
     // A log being chopped, and the cell that holds its progress.
     private record Chopped(BlockPos pos, FellingLogBlockEntity entity) {}
+
+    // The log a player was last credited on, and when.
+    private record Chop(ServerLevel level, BlockPos master, long tick) {}
 }

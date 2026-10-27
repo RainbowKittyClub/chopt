@@ -1,8 +1,14 @@
 package club.rainbowkitty.chopt.block;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
+import com.mojang.serialization.Codec;
 import org.jspecify.annotations.Nullable;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.UUIDUtil;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -12,9 +18,10 @@ import net.minecraft.world.level.storage.ValueOutput;
 import club.rainbowkitty.chopt.tree.Family;
 
 /**
- * What a felling log remembers: the log it was, how far the felling has come, and what it has
- * cost the tool so far. Everything is saved with the block, so a chop survives a restart and a
- * chunk unload. A quarter group is four of these; the northwest cell's carries the progress.
+ * What a felling log remembers: the log it was, how far each player has come through the current
+ * phase, and what the tool has paid so far. Everything is saved with the block, so a chop survives
+ * a restart and a chunk unload. A quarter group is four of these; the northwest cell's carries the
+ * progress.
  */
 public final class FellingLogBlockEntity extends BlockEntity {
     private static final String FAMILY = "family";
@@ -22,16 +29,18 @@ public final class FellingLogBlockEntity extends BlockEntity {
     private static final String ORIGINAL = "original";
     private static final String STRIPPED = "stripped";
     private static final String LOGS_ABOVE = "logs_above";
-    private static final String PROGRESS = "progress";
+    private static final String PROGRESS = "progress_by";
     private static final String LAST_HIT = "last_hit";
     private static final String PAID = "paid";
+    private static final Codec<Map<UUID, Integer>> PROGRESS_CODEC =
+            Codec.unboundedMap(UUIDUtil.STRING_CODEC, Codec.INT);
 
     private @Nullable Family family;
     private int phases = 1;
     private @Nullable BlockState original;
     private @Nullable BlockState stripped;
     private int logsAbove;
-    private int progress;
+    private Map<UUID, Integer> progress = new HashMap<>();
     private long lastHit;
     private int paid;
 
@@ -83,14 +92,25 @@ public final class FellingLogBlockEntity extends BlockEntity {
         this.logsAbove = logsAbove;
     }
 
-    /** Progress through the current phase, in 1/65536 of it. */
-    public int progress() {
-        return progress;
+    /** How far {@code player} has come through the current phase, in 1/65536 of it. */
+    public int progressOf(UUID player) {
+        return progress.getOrDefault(player, 0);
     }
 
-    /** Sets the progress through the current phase, in 1/65536 of it. */
-    public void setProgress(int progress) {
-        this.progress = progress;
+    /** Sets how far {@code player} has come through the current phase, in 1/65536 of it. */
+    public void setProgressOf(UUID player, int value) {
+        progress.put(player, value);
+    }
+
+    /**
+     * Begins the next phase. Only the player who completed the last one keeps anything, the part
+     * of their work that ran past it; everyone else starts it from nothing.
+     */
+    public void startNextPhase(UUID completer, int carried) {
+        progress.clear();
+        if (carried > 0) {
+            progress.put(completer, carried);
+        }
     }
 
     /** The server tick a player last advanced this log. */
@@ -128,7 +148,8 @@ public final class FellingLogBlockEntity extends BlockEntity {
         this.original = input.read(ORIGINAL, BlockState.CODEC).orElse(null);
         this.stripped = input.read(STRIPPED, BlockState.CODEC).orElse(null);
         this.logsAbove = input.getIntOr(LOGS_ABOVE, 0);
-        this.progress = input.getIntOr(PROGRESS, 0);
+        this.progress = input.read(PROGRESS, PROGRESS_CODEC).map(HashMap::new)
+                .orElseGet(HashMap::new);
         this.lastHit = input.getLongOr(LAST_HIT, 0L);
         this.paid = input.getIntOr(PAID, 0);
     }
@@ -143,7 +164,9 @@ public final class FellingLogBlockEntity extends BlockEntity {
         output.storeNullable(ORIGINAL, BlockState.CODEC, original);
         output.storeNullable(STRIPPED, BlockState.CODEC, stripped);
         output.putInt(LOGS_ABOVE, logsAbove);
-        output.putInt(PROGRESS, progress);
+        if (!progress.isEmpty()) {
+            output.store(PROGRESS, PROGRESS_CODEC, progress);
+        }
         output.putLong(LAST_HIT, lastHit);
         output.putInt(PAID, paid);
     }
