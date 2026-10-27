@@ -10,12 +10,14 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.util.StringRepresentable;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.RotatedPillarBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.block.state.properties.Property;
 
 import club.rainbowkitty.chopt.Chopt;
@@ -88,6 +90,30 @@ public final class Stageable {
     public static boolean isLeafy(BlockState state) {
         Property<?> property = state.getBlock().getStateDefinition().getProperty("has_leaves");
         return property != null && Boolean.TRUE.equals(state.getValue(property));
+    }
+
+    /** {@code state} without its leaves, a leafy small log's bare log. */
+    public static BlockState withoutLeaves(BlockState state) {
+        Property<?> property = state.getBlock().getStateDefinition().getProperty("has_leaves");
+        if (property instanceof BooleanProperty leaves) {
+            return state.setValue(leaves, false);
+        }
+        return state;
+    }
+
+    /**
+     * The leaves block a leafy small log at {@code pos} carries, asked through its
+     * {@code leavesAt(BlockGetter, BlockPos)}; null for a block that does not answer.
+     */
+    public static @Nullable Block leavesOf(BlockGetter level, BlockPos pos, BlockState state) {
+        try {
+            Object leaves = state.getBlock().getClass()
+                    .getMethod("leavesAt", BlockGetter.class, BlockPos.class)
+                    .invoke(state.getBlock(), level, pos);
+            return leaves instanceof Block block ? block : null;
+        } catch (ReflectiveOperationException e) {
+            return null;
+        }
     }
 
     /** Whether {@code state} stands upright. */

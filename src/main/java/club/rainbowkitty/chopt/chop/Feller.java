@@ -20,6 +20,7 @@ import club.rainbowkitty.chopt.block.FellingLogBlock;
 import club.rainbowkitty.chopt.block.FellingLogBlockEntity;
 import club.rainbowkitty.chopt.hold.ChopHolds;
 import club.rainbowkitty.chopt.tree.Region;
+import club.rainbowkitty.chopt.tree.Stageable;
 
 /**
  * Brings a tree down when its last phase completes: settles what the tools owe, then removes the
@@ -101,6 +102,9 @@ public final class Feller {
         if (!state.is(BlockTags.LOGS)) {
             return false;
         }
+        if (Stageable.isLeafy(state)) {
+            state = stripLeaves(level, breaker, tool, pos, state);
+        }
         BlockEntity entity = level.getBlockEntity(pos);
         if (!PlayerBlockBreakEvents.BEFORE.invoker().beforeBlockBreak(level, breaker, pos, state,
                 entity)) {
@@ -116,6 +120,21 @@ public final class Feller {
         breaker.awardStat(Stats.BLOCK_MINED.get(mined));
         breaker.causeFoodExhaustion(EXHAUSTION);
         return true;
+    }
+
+    // A leafy small log gives up its leaves first, as breaking just the leaves would, so the
+    // listeners that take the leaves on the break event find a bare log. The leaves are free: they
+    // are part of the log, which is what the tool pays for.
+    private static BlockState stripLeaves(ServerLevel level, ServerPlayer breaker, ItemStack tool,
+            BlockPos pos, BlockState state) {
+        Block leaves = Stageable.leavesOf(level, pos, state);
+        if (leaves != null) {
+            Block.dropResources(leaves.defaultBlockState(), level, pos, null, breaker, tool);
+            breaker.awardStat(Stats.BLOCK_MINED.get(leaves));
+        }
+        BlockState bare = Stageable.withoutLeaves(state);
+        level.setBlock(pos, bare, Block.UPDATE_ALL);
+        return bare;
     }
 
     // Puts a cut cell that did not fall back as the log it was, so it does not wait forever.
