@@ -33,7 +33,8 @@ public final class ChoptCommand {
                                 .then(LedgerProbe.node())
                                 .then(TreeProbe.node())
                                 .then(FellingProbe.node(build))
-                                .then(HoldProbe.node()))));
+                                .then(HoldProbe.node())
+                                .then(ModelsProbe.node()))));
     }
 
     // Lists every setting's value as this server reads it.

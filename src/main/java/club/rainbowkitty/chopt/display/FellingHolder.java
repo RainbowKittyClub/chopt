@@ -1,6 +1,5 @@
 package club.rainbowkitty.chopt.display;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -12,6 +11,7 @@ import eu.pb4.polymer.virtualentity.api.attachment.BlockAwareAttachment;
 import eu.pb4.polymer.virtualentity.api.attachment.HolderAttachment;
 import eu.pb4.polymer.virtualentity.api.elements.BlockDisplayElement;
 import eu.pb4.polymer.virtualentity.api.elements.ItemDisplayElement;
+import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.jspecify.annotations.Nullable;
 
@@ -23,13 +23,14 @@ import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemDisplayContext;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.PipeBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 
 import club.rainbowkitty.chopt.block.FellingLogBlock;
 import club.rainbowkitty.chopt.block.FellingLogBlockEntity;
+import club.rainbowkitty.chopt.pack.FellingModels;
 import club.rainbowkitty.chopt.tree.Family;
 import club.rainbowkitty.chopt.tree.Stageable;
 
@@ -38,31 +39,29 @@ import club.rainbowkitty.chopt.tree.Stageable;
  * barrier every client sees. It is built before the block entity exists, so a conversion hands it
  * the species directly and a chunk load fills it in on its first tick. A quarter group is drawn
  * once, by its northwest cell, as four block displays squeezed toward the middle of the group. A
- * small log is a block display for most viewers, but a viewer with the server's pack is shown the
- * item display that polymer-patch-bundle draws small logs with, because a block display of a small
- * log shows the chorus plant it stands in for.
+ * viewer with the server's pack is shown the species' cropped model instead, in an item display, so
+ * the texture keeps its scale and a small log is not the chorus plant that a block display of it
+ * shows; a species with no model is a block display for everyone.
  */
 public final class FellingHolder extends ElementHolder {
     // A display's view range is 64 blocks times this and its own scale, which shrinks with the
     // phases; a generous value keeps a thin log from vanishing while its barrier cell stands.
     private static final float VIEW_RANGE = 2.0F;
 
-    // polymer-patch-bundle's small-log item, by reflection: it is not a dependency, and where it is
-    // absent a small log keeps its block display.
-    private static final @Nullable Method SMALL_LOG_ITEM = ppbMethod("stack", Identifier.class,
-            BlockState.class);
-    private static final @Nullable Method SMALL_LOG_PARTS = ppbMethod("parts", Identifier.class);
-
     private final FellingLogBlock.@Nullable Pending staged;
     private @Nullable Species species;
     private final List<ViewerBlockDisplay> shown = new ArrayList<>();
-    private @Nullable ViewerItemDisplay column;
-    private @Nullable ItemStack columnItem;
-    private boolean columnChecked;
+    private @Nullable ViewerItemDisplay cropped;
+    // Whether the pack had cropped models for this log when it was last drawn. The pack is built
+    // after the server starts, so a log can be drawn before its models exist.
+    private boolean cropKnown;
     private int drawnPhase = -1;
 
-    /** What is known of the log being drawn: the family and the stripped look of each cell. */
-    private record Species(Family family, List<BlockState> stripped) {}
+    /**
+     * What is known of the log being drawn: the family, the stripped look of each cell, and the
+     * block the pack's cropped models would be under, null for a quarter group's followers.
+     */
+    private record Species(Family family, List<BlockState> stripped, @Nullable Identifier block) {}
 
     /**
      * Creates the holder for a felling log; {@code staged} is the data of a conversion in
@@ -97,7 +96,16 @@ public final class FellingHolder extends ElementHolder {
         if (species == null) {
             species = learn(attachment.getBlockPos(), attachment.getWorld());
         }
-        if (species == null || phase == drawnPhase) {
+        if (species == null) {
+            return;
+        }
+        boolean crop = species.block() != null
+                && FellingModels.defines(species.block(), species.family());
+        if (crop != cropKnown) {
+            clear();
+            cropKnown = crop;
+        }
+        if (phase == drawnPhase) {
             return;
         }
         drawnPhase = phase;
@@ -121,7 +129,22 @@ public final class FellingHolder extends ElementHolder {
     private @Nullable Species speciesOf(ServerLevel level, BlockPos pos, Family family,
             BlockState stripped) {
         return family == Family.QUARTER ? quarterSpecies(level, pos)
-                : new Species(family, List.of(stripped));
+                : new Species(family, List.of(stripped), blockOf(stripped));
+    }
+
+    private static Identifier blockOf(BlockState stripped) {
+        return BuiltInRegistries.BLOCK.getKey(stripped.getBlock());
+    }
+
+    // Takes every element down, so the log is drawn from nothing the next time.
+    private void clear() {
+        shown.forEach(this::removeElement);
+        shown.clear();
+        if (cropped != null) {
+            removeElement(cropped);
+            cropped = null;
+        }
+        drawnPhase = -1;
     }
 
     // A quarter group's four stripped looks, northwest first, or null until every cell is staged.
@@ -136,7 +159,7 @@ public final class FellingHolder extends ElementHolder {
             return null;
         }
         if (corner != Stageable.Corner.NORTHWEST) {
-            return new Species(Family.QUARTER, List.of());
+            return new Species(Family.QUARTER, List.of(), null);
         }
         List<BlockState> looks = new ArrayList<>();
         for (BlockPos cell : Stageable.quarterCells(pos, corner)) {
@@ -146,7 +169,7 @@ public final class FellingHolder extends ElementHolder {
             }
             looks.add(other.stripped());
         }
-        return new Species(Family.QUARTER, looks);
+        return new Species(Family.QUARTER, looks, blockOf(looks.get(0)));
     }
 
     // Sets the elements for one phase: built the first time, then only moved and resized, so a
@@ -161,9 +184,10 @@ public final class FellingHolder extends ElementHolder {
             // The holder sits at the northwest cell's centre, and the group's middle is the corner
             // it shares with the other three: half a block east and south of that.
             for (int i = 0; i < 4; i++) {
-                place(i, looks.stripped().get(i), new Vector3f(s, 1.0F, s),
+                place(looks, i, looks.stripped().get(i), new Vector3f(s, 1.0F, s),
                         new Vector3f(0.5F + cells[i][0] * s, -0.5F, 0.5F + cells[i][1] * s));
             }
+            crop(looks, Direction.Axis.Y, phase, new Vec3(0.5, 0.0, 0.5));
             return;
         }
         float s = looks.family().width(phase) / (looks.family() == Family.SMALL ? 10.0F : 16.0F);
@@ -172,26 +196,20 @@ public final class FellingHolder extends ElementHolder {
             case Y -> new Vector3f(s, 1.0F, s);
             case Z -> new Vector3f(s, s, 1.0F);
         };
-        if (looks.family() == Family.SMALL && !columnChecked) {
-            columnChecked = true;
-            columnItem = smallLogColumn(looks.stripped().get(0), axis);
-        }
-        place(0, looks.stripped().get(0), scale,
+        place(looks, 0, looks.stripped().get(0), scale,
                 new Vector3f(-scale.x / 2.0F, -scale.y / 2.0F, -scale.z / 2.0F));
-        if (columnItem != null) {
-            placeColumn(scale);
-        }
+        crop(looks, axis, phase, Vec3.ZERO);
     }
 
     // Block display {@code index}: made if it is not there yet, and set to this scale and shift.
-    private void place(int index, BlockState look, Vector3f scale, Vector3f shift) {
+    private void place(Species looks, int index, BlockState look, Vector3f scale, Vector3f shift) {
         ViewerBlockDisplay element;
         if (index < shown.size()) {
             element = shown.get(index);
         } else {
             element = new ViewerBlockDisplay(look);
             element.setViewRange(VIEW_RANGE);
-            if (columnItem != null) {
+            if (cropKnown) {
                 element.viewers = viewer -> !hasPack(viewer);
             }
             shown.add(element);
@@ -201,66 +219,34 @@ public final class FellingHolder extends ElementHolder {
         element.setTranslation(shift);
     }
 
-    // The small log's column for viewers with the pack: the item display is made the first time,
-    // then only resized. It is centred on the block, so the scale needs no shift.
-    private void placeColumn(Vector3f scale) {
-        if (column == null) {
-            column = new ViewerItemDisplay(columnItem);
-            column.setItemDisplayContext(ItemDisplayContext.NONE);
-            column.setYaw(180.0F);
-            column.setViewRange(VIEW_RANGE);
-            column.viewers = FellingHolder::hasPack;
-            addElement(column);
+    // The cropped model for viewers with the pack: an item display made the first time and then
+    // given the next phase's model. The models are upright and centred on the display, and a log
+    // along another axis is turned to it. Item displays draw facing the other way, hence the yaw.
+    private void crop(Species looks, Direction.Axis axis, int phase, Vec3 offset) {
+        if (!cropKnown || looks.block() == null) {
+            return;
         }
-        column.setScale(scale);
+        if (cropped == null) {
+            cropped = new ViewerItemDisplay();
+            cropped.setItemDisplayContext(ItemDisplayContext.NONE);
+            cropped.setYaw(180.0F);
+            cropped.setOffset(offset);
+            cropped.setViewRange(VIEW_RANGE);
+            // The turns of vanilla's x:90,y:90 (along x) and x:90 (along z), seen through the item
+            // display's own half turn.
+            cropped.setLeftRotation(switch (axis) {
+                case X -> new Quaternionf().rotationY(-Mth.HALF_PI).rotateX(Mth.HALF_PI);
+                case Z -> new Quaternionf().rotateX(Mth.HALF_PI);
+                case Y -> new Quaternionf();
+            });
+            cropped.viewers = FellingHolder::hasPack;
+            addElement(cropped);
+        }
+        cropped.setItem(FellingModels.stack(looks.block(), phase));
     }
 
     private static boolean hasPack(ServerPlayer viewer) {
         return PolymerResourcePackUtils.hasMainPack(viewer.connection);
-    }
-
-    // The item polymer-patch-bundle draws the stripped small log with, with only the two arms
-    // along the axis, or null when it cannot be made. The arm flags are the stack's custom model
-    // data, set from the state.
-    private static @Nullable ItemStack smallLogColumn(BlockState stripped, Direction.Axis axis) {
-        Identifier id = BuiltInRegistries.BLOCK.getKey(stripped.getBlock());
-        if (SMALL_LOG_ITEM == null || !drawnByPpb(id)) {
-            return null;
-        }
-        BlockState arms = stripped;
-        for (Direction side : Direction.values()) {
-            var arm = PipeBlock.PROPERTY_BY_DIRECTION.get(side);
-            if (!arms.hasProperty(arm)) {
-                return null;
-            }
-            arms = arms.setValue(arm, side.getAxis() == axis);
-        }
-        try {
-            return (ItemStack) SMALL_LOG_ITEM.invoke(null, id, arms);
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            return null;
-        }
-    }
-
-    // Whether ppb read this block's arm parts and so put its item model in the pack: it keeps a
-    // block it cannot read as a plain full-block stand-in, which has no item to draw.
-    private static boolean drawnByPpb(Identifier id) {
-        if (SMALL_LOG_PARTS == null) {
-            return false;
-        }
-        try {
-            return !((List<?>) SMALL_LOG_PARTS.invoke(null, id)).isEmpty();
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            return false;
-        }
-    }
-
-    private static @Nullable Method ppbMethod(String name, Class<?>... types) {
-        try {
-            return Class.forName("me.drex.ppb.block.SmallLogDisplays").getMethod(name, types);
-        } catch (ReflectiveOperationException | LinkageError e) {
-            return null;
-        }
     }
 
     // A block display that only the viewers it is meant for are sent. Its updates still go to every
@@ -285,8 +271,8 @@ public final class FellingHolder extends ElementHolder {
     private static final class ViewerItemDisplay extends ItemDisplayElement {
         Predicate<ServerPlayer> viewers = viewer -> true;
 
-        ViewerItemDisplay(ItemStack item) {
-            super(item);
+        ViewerItemDisplay() {
+            super();
         }
 
         @Override

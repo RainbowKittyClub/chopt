@@ -12,6 +12,7 @@ import club.rainbowkitty.chopt.chop.Falls;
 import club.rainbowkitty.chopt.command.ChoptCommand;
 import club.rainbowkitty.chopt.hold.ChopPoll;
 import club.rainbowkitty.chopt.ledger.PlacedLogs;
+import club.rainbowkitty.chopt.pack.FellingModels;
 
 /** Mod entrypoint. */
 public class Chopt implements ModInitializer {
@@ -30,6 +31,7 @@ public class Chopt implements ModInitializer {
         ChoptBlocks.init();
         Conversion.register();
         Falls.register();
+        FellingModels.register();
         ChopPoll.register();
         ChoptCommand.register();
     }
