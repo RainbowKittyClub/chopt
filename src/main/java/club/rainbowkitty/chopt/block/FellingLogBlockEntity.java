@@ -1,14 +1,13 @@
 package club.rainbowkitty.chopt.block;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import com.mojang.serialization.Codec;
 import org.jspecify.annotations.Nullable;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.UUIDUtil;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -16,31 +15,38 @@ import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 
 import club.rainbowkitty.chopt.tree.Family;
+import club.rainbowkitty.chopt.tree.Stageable;
 
 /**
- * What a felling log remembers: the log it was, how far each player has come through the current
- * phase, and what the tool has paid so far. Everything is saved with the block, so a chop survives
- * a restart and a chunk unload. A quarter group is four of these; the northwest cell's carries the
- * progress.
+ * What a felling log remembers: the log it was, where it sits in its 2x2 group, and what the tool
+ * has paid so far; these are saved with the block, so a chop survives a restart and a chunk unload.
+ * It also holds how far each player has come through the current phase, which is not saved: like a
+ * vanilla break, that work is lost when the player stops. A group is four of these; the northwest
+ * cell's carries the progress.
  */
 public final class FellingLogBlockEntity extends BlockEntity {
     private static final String FAMILY = "family";
     private static final String PHASES = "phases";
     private static final String ORIGINAL = "original";
     private static final String STRIPPED = "stripped";
+    private static final String CORNER = "corner";
     private static final String LOGS_ABOVE = "logs_above";
-    private static final String PROGRESS = "progress_by";
     private static final String LAST_HIT = "last_hit";
     private static final String PAID = "paid";
-    private static final Codec<Map<UUID, Integer>> PROGRESS_CODEC =
-            Codec.unboundedMap(UUIDUtil.STRING_CODEC, Codec.INT);
+    // The stages a crack goes through on the way to a phase's end, as vanilla's break does.
+    private static final int CRACK_STAGES = 10;
+
+    /** One phase, in the fixed-point units progress is kept in. */
+    public static final int UNIT = 65536;
 
     private @Nullable Family family;
     private int phases = 1;
     private @Nullable BlockState original;
     private @Nullable BlockState stripped;
+    private Stageable.@Nullable Corner corner;
     private int logsAbove;
-    private Map<UUID, Integer> progress = new HashMap<>();
+    // Not saved: in 1/65536 of the current phase, for each player who is still chopping.
+    private final Map<UUID, Integer> progress = new HashMap<>();
     private long lastHit;
     private int paid;
 
@@ -54,6 +60,7 @@ public final class FellingLogBlockEntity extends BlockEntity {
         this.phases = pending.phases();
         this.original = pending.original();
         this.stripped = pending.stripped();
+        this.corner = pending.corner();
         this.logsAbove = pending.logsAbove();
     }
 
@@ -65,6 +72,11 @@ public final class FellingLogBlockEntity extends BlockEntity {
     /** How many phases this felling goes through: the family's, or 1 for a short cut. */
     public int phases() {
         return phases;
+    }
+
+    /** The corner of its 2x2 group this cell is, or null for a log that stands alone. */
+    public Stageable.@Nullable Corner corner() {
+        return corner;
     }
 
     /**
@@ -115,6 +127,31 @@ public final class FellingLogBlockEntity extends BlockEntity {
         progress.put(player, value);
     }
 
+    /** What each player still chopping has done on the current phase, in 1/65536 of it. */
+    public List<Integer> progressValues() {
+        return List.copyOf(progress.values());
+    }
+
+    /** Forgets what {@code player} has done on the current phase. */
+    public void clearProgressOf(UUID player) {
+        progress.remove(player);
+    }
+
+    /**
+     * The crack stage to show over the log, from 0 to 9, or -1 for none: how far the player who is
+     * furthest along has come through the current phase, in tenths of it, as a vanilla crack goes.
+     */
+    public int crackStage() {
+        int furthest = 0;
+        for (int value : progress.values()) {
+            furthest = Math.max(furthest, value);
+        }
+        if (furthest <= 0) {
+            return -1;
+        }
+        return (int) Math.min(CRACK_STAGES - 1, (long) furthest * CRACK_STAGES / UNIT);
+    }
+
     /**
      * Begins the next phase. Only the player who completed the last one keeps anything, the part
      * of their work that ran past it; everyone else starts it from nothing.
@@ -160,9 +197,12 @@ public final class FellingLogBlockEntity extends BlockEntity {
         this.phases = input.getIntOr(PHASES, 1);
         this.original = input.read(ORIGINAL, BlockState.CODEC).orElse(null);
         this.stripped = input.read(STRIPPED, BlockState.CODEC).orElse(null);
+        this.corner = input.getString(CORNER).map(Stageable.Corner::named).orElse(null);
+        if (corner == null && family == Family.GROUP && original != null) {
+            // Saved before the corner was: a quarter log's bark side says it.
+            this.corner = Stageable.barkSide(original);
+        }
         this.logsAbove = input.getIntOr(LOGS_ABOVE, 0);
-        this.progress = input.read(PROGRESS, PROGRESS_CODEC).map(HashMap::new)
-                .orElseGet(HashMap::new);
         this.lastHit = input.getLongOr(LAST_HIT, 0L);
         this.paid = input.getIntOr(PAID, 0);
     }
@@ -176,10 +216,10 @@ public final class FellingLogBlockEntity extends BlockEntity {
         output.putInt(PHASES, phases);
         output.storeNullable(ORIGINAL, BlockState.CODEC, original);
         output.storeNullable(STRIPPED, BlockState.CODEC, stripped);
-        output.putInt(LOGS_ABOVE, logsAbove);
-        if (!progress.isEmpty()) {
-            output.store(PROGRESS, PROGRESS_CODEC, progress);
+        if (corner != null) {
+            output.putString(CORNER, corner.name());
         }
+        output.putInt(LOGS_ABOVE, logsAbove);
         output.putLong(LAST_HIT, lastHit);
         output.putInt(PAID, paid);
     }
@@ -187,7 +227,7 @@ public final class FellingLogBlockEntity extends BlockEntity {
     // The family a saved name stands for, or null for one a later version dropped.
     private static @Nullable Family familyNamed(String name) {
         try {
-            return Family.valueOf(name);
+            return Family.valueOf(name.equals("QUARTER") ? "GROUP" : name);
         } catch (IllegalArgumentException e) {
             return null;
         }

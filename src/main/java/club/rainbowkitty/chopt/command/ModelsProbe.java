@@ -1,6 +1,7 @@
 package club.rainbowkitty.chopt.command;
 
 import java.util.Map;
+import java.util.Set;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -17,7 +18,7 @@ import club.rainbowkitty.chopt.tree.Family;
 
 /**
  * {@code /chopt probe models}: how many species of log the pack has cropped models for, by family;
- * {@code <block>} says whether one block is among them.
+ * {@code <block>} says which families one block has them for.
  */
 final class ModelsProbe {
     private ModelsProbe() {}
@@ -31,9 +32,10 @@ final class ModelsProbe {
     }
 
     private static int summary(CommandContext<CommandSourceStack> context) {
-        Map<Identifier, Family> species = FellingModels.species();
+        Map<Identifier, Map<Family, String>> species = FellingModels.species();
         int[] counts = new int[Family.values().length];
-        species.values().forEach(family -> counts[family.ordinal()]++);
+        species.values().forEach(families -> families.keySet()
+                .forEach(family -> counts[family.ordinal()]++));
         StringBuilder line = new StringBuilder("models for " + species.size() + " species");
         for (Family family : Family.values()) {
             line.append(", ").append(family).append(' ').append(counts[family.ordinal()]);
@@ -44,9 +46,10 @@ final class ModelsProbe {
 
     private static int one(CommandContext<CommandSourceStack> context) {
         Identifier block = Identifier.tryParse(StringArgumentType.getString(context, "block"));
-        Family family = block == null ? null : FellingModels.species().get(block);
+        Map<Family, String> families = block == null ? null : FellingModels.species().get(block);
+        Set<Family> kinds = families == null ? Set.of() : families.keySet();
         context.getSource().sendSuccess(() -> Component.literal(block + ": "
-                + (family == null ? "no model" : "model as " + family)), false);
+                + (kinds.isEmpty() ? "no model" : "model as " + kinds)), false);
         return Command.SINGLE_SUCCESS;
     }
 }

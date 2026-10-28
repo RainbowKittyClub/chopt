@@ -25,6 +25,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemDisplayContext;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
@@ -37,11 +38,12 @@ import club.rainbowkitty.chopt.tree.Stageable;
 /**
  * What a felling log looks like: the stripped log, narrower with each phase, drawn inside the
  * barrier every client sees. It is built before the block entity exists, so a conversion hands it
- * the species directly and a chunk load fills it in on its first tick. A quarter group is drawn
+ * the species directly and a chunk load fills it in on its first tick. A 2x2 group is drawn
  * once, by its northwest cell, as four block displays squeezed toward the middle of the group. A
  * viewer with the server's pack is shown the species' cropped model instead, in an item display, so
  * the texture keeps its scale and a small log is not the chorus plant that a block display of it
- * shows; a species with no model is a block display for everyone.
+ * shows; a species with no model is a block display for everyone. The same viewers see the
+ * cracks of whoever is chopping, over the log, where the pack has them.
  */
 public final class FellingHolder extends ElementHolder {
     // A display's view range is 64 blocks times this and its own scale, which shrinks with the
@@ -52,14 +54,19 @@ public final class FellingHolder extends ElementHolder {
     private @Nullable Species species;
     private final List<ViewerBlockDisplay> shown = new ArrayList<>();
     private @Nullable ViewerItemDisplay cropped;
+    private @Nullable ViewerItemDisplay crack;
     // Whether the pack had cropped models for this log when it was last drawn. The pack is built
     // after the server starts, so a log can be drawn before its models exist.
     private boolean cropKnown;
     private int drawnPhase = -1;
+    private Direction.Axis drawnAxis = Direction.Axis.Y;
+    // The crack stage on show and the phase it was made for, so a change of either is noticed.
+    private int shownCrack = -1;
+    private int crackPhase = -1;
 
     /**
      * What is known of the log being drawn: the family, the stripped look of each cell, and the
-     * block the pack's cropped models would be under, null for a quarter group's followers.
+     * block the pack's cropped models would be under, null for a group's followers.
      */
     private record Species(Family family, List<BlockState> stripped, @Nullable Identifier block) {}
 
@@ -76,6 +83,7 @@ public final class FellingHolder extends ElementHolder {
         super.notifyUpdate(type);
         if (type == BlockAwareAttachment.BLOCK_STATE_UPDATE) {
             redraw();
+            updateCrack();
         }
     }
 
@@ -83,6 +91,7 @@ public final class FellingHolder extends ElementHolder {
     protected void onTick() {
         super.onTick();
         redraw();
+        updateCrack();
     }
 
     // Draws the log again if its phase is not the one on show.
@@ -109,7 +118,8 @@ public final class FellingHolder extends ElementHolder {
             return;
         }
         drawnPhase = phase;
-        draw(species, state.getValue(FellingLogBlock.AXIS), phase);
+        drawnAxis = state.getValue(FellingLogBlock.AXIS);
+        draw(species, drawnAxis, phase);
     }
 
     // The species of the log, from the conversion in progress or else the block entity; null while
@@ -128,7 +138,7 @@ public final class FellingHolder extends ElementHolder {
     // The species of one log, or of the group it heads when it is a quarter log.
     private @Nullable Species speciesOf(ServerLevel level, BlockPos pos, Family family,
             BlockState stripped) {
-        return family == Family.QUARTER ? quarterSpecies(level, pos)
+        return family == Family.GROUP ? groupSpecies(level, pos)
                 : new Species(family, List.of(stripped), blockOf(stripped));
     }
 
@@ -144,32 +154,33 @@ public final class FellingHolder extends ElementHolder {
             removeElement(cropped);
             cropped = null;
         }
+        removeCrack();
         drawnPhase = -1;
     }
 
-    // A quarter group's four stripped looks, northwest first, or null until every cell is staged.
-    // A cell that is not the northwest one draws nothing.
-    private @Nullable Species quarterSpecies(ServerLevel level, BlockPos pos) {
+    // A group's four stripped looks, northwest first, or null until every cell is staged. A cell
+    // that is not the northwest one draws nothing.
+    private @Nullable Species groupSpecies(ServerLevel level, BlockPos pos) {
         if (!(level.getBlockEntity(pos) instanceof FellingLogBlockEntity self)
                 || self.original() == null) {
             return null;
         }
-        Stageable.Corner corner = Stageable.barkSide(self.original());
+        Stageable.Corner corner = self.corner();
         if (corner == null) {
             return null;
         }
         if (corner != Stageable.Corner.NORTHWEST) {
-            return new Species(Family.QUARTER, List.of(), null);
+            return new Species(Family.GROUP, List.of(), null);
         }
         List<BlockState> looks = new ArrayList<>();
-        for (BlockPos cell : Stageable.quarterCells(pos, corner)) {
+        for (BlockPos cell : Stageable.groupCells(pos, corner)) {
             if (!(level.getBlockEntity(cell) instanceof FellingLogBlockEntity other)
                     || other.stripped() == null) {
                 return null;
             }
             looks.add(other.stripped());
         }
-        return new Species(Family.QUARTER, looks, blockOf(looks.get(0)));
+        return new Species(Family.GROUP, looks, blockOf(looks.get(0)));
     }
 
     // Sets the elements for one phase: built the first time, then only moved and resized, so a
@@ -178,8 +189,8 @@ public final class FellingHolder extends ElementHolder {
         if (looks.stripped().isEmpty()) {
             return;
         }
-        if (looks.family() == Family.QUARTER) {
-            float s = Family.QUARTER.width(phase) / 32.0F;
+        if (looks.family() == Family.GROUP) {
+            float s = Family.GROUP.width(phase) / 32.0F;
             float[][] cells = {{-1, -1}, {0, -1}, {0, 0}, {-1, 0}};
             // The holder sits at the northwest cell's centre, and the group's middle is the corner
             // it shares with the other three: half a block east and south of that.
@@ -227,22 +238,70 @@ public final class FellingHolder extends ElementHolder {
             return;
         }
         if (cropped == null) {
-            cropped = new ViewerItemDisplay();
-            cropped.setItemDisplayContext(ItemDisplayContext.NONE);
-            cropped.setYaw(180.0F);
-            cropped.setOffset(offset);
-            cropped.setViewRange(VIEW_RANGE);
-            // The turns of vanilla's x:90,y:90 (along x) and x:90 (along z), seen through the item
-            // display's own half turn.
-            cropped.setLeftRotation(switch (axis) {
-                case X -> new Quaternionf().rotationY(-Mth.HALF_PI).rotateX(Mth.HALF_PI);
-                case Z -> new Quaternionf().rotateX(Mth.HALF_PI);
-                case Y -> new Quaternionf();
-            });
-            cropped.viewers = FellingHolder::hasPack;
+            cropped = modelDisplay(axis, offset);
             addElement(cropped);
         }
-        cropped.setItem(FellingModels.stack(looks.block(), phase));
+        cropped.setItem(FellingModels.stack(looks.block(), looks.family(), phase));
+    }
+
+    // An item display that shows a model in the log's own place, for the viewers with the pack.
+    private static ViewerItemDisplay modelDisplay(Direction.Axis axis, Vec3 offset) {
+        ViewerItemDisplay display = new ViewerItemDisplay();
+        display.setItemDisplayContext(ItemDisplayContext.NONE);
+        display.setYaw(180.0F);
+        display.setOffset(offset);
+        display.setViewRange(VIEW_RANGE);
+        // The turns of vanilla's x:90,y:90 (along x) and x:90 (along z), seen through the item
+        // display's own half turn.
+        display.setLeftRotation(switch (axis) {
+            case X -> new Quaternionf().rotationY(-Mth.HALF_PI).rotateX(Mth.HALF_PI);
+            case Z -> new Quaternionf().rotateX(Mth.HALF_PI);
+            case Y -> new Quaternionf();
+        });
+        display.viewers = FellingHolder::hasPack;
+        return display;
+    }
+
+    // Shows the crack stage the block entity asks for, in the shape of the log's current phase.
+    // The cracks are a second item display, made when the first crack comes and taken down when
+    // the last goes.
+    private void updateCrack() {
+        if (!(getAttachment() instanceof BlockAwareAttachment attachment)) {
+            return;
+        }
+        int stage = attachment.getWorld().getBlockEntity(attachment.getBlockPos())
+                instanceof FellingLogBlockEntity log ? log.crackStage() : -1;
+        if (stage == shownCrack && crackPhase == drawnPhase) {
+            return;
+        }
+        shownCrack = stage;
+        crackPhase = drawnPhase;
+        boolean drawn = cropKnown && drawnPhase >= 0 && species != null
+                && species.block() != null;
+        Identifier shape = stage < 0 || !drawn ? null : FellingModels.parent(species.block(),
+                species.family(), species.family().width(drawnPhase));
+        ItemStack cracks = shape == null ? null : Cracks.stack(shape, stage);
+        if (cracks == null) {
+            removeCrack();
+            shownCrack = stage;
+            crackPhase = drawnPhase;
+            return;
+        }
+        if (crack == null) {
+            crack = modelDisplay(drawnAxis,
+                    species.family() == Family.GROUP ? new Vec3(0.5, 0.0, 0.5) : Vec3.ZERO);
+            addElement(crack);
+        }
+        crack.setItem(cracks);
+    }
+
+    private void removeCrack() {
+        if (crack != null) {
+            removeElement(crack);
+            crack = null;
+        }
+        shownCrack = -1;
+        crackPhase = -1;
     }
 
     private static boolean hasPack(ServerPlayer viewer) {

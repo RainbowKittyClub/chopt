@@ -34,6 +34,7 @@ public final class ChoptCommand {
                                 .then(TreeProbe.node())
                                 .then(FellingProbe.node(build))
                                 .then(HoldProbe.node())
+                                .then(ProgressProbe.node())
                                 .then(ModelsProbe.node()))));
     }
 

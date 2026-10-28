@@ -58,7 +58,7 @@ public final class Conversion {
         if (!region.stageable() || region.n() < 1 || !Canopy.passes(level, region)) {
             return true;
         }
-        if (family == Family.QUARTER && !siblingsAgree(level, breaker, region, pos)) {
+        if (family == Family.GROUP && !siblingsAgree(level, breaker, region, pos)) {
             return true;
         }
         // Read while the log is still there: the strip rules look at the block at the position.
@@ -66,10 +66,10 @@ public final class Conversion {
         double base = state.getDestroyProgress(breaker, level, pos);
         double m = TimeCurve.m(level.getServer(), region.n());
         int phases = TimeCurve.effectivePhases(family, m, base);
-        if (family == Family.QUARTER) {
+        if (family == Family.GROUP) {
             FellingLogBlock.stageGroup(level, region.cluster(), phases, region.n());
         } else {
-            FellingLogBlock.stage(level, pos, state, family, phases, region.n());
+            FellingLogBlock.stage(level, pos, state, family, null, phases, region.n());
         }
         Feedback.broke(level, pos, stripped, breaker);
         return false;

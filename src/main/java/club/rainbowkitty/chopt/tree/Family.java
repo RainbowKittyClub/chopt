@@ -10,8 +10,8 @@ public enum Family {
     PILLAR(7, 16),
     /** A 10 px small log, drawn as a column along its main axis. */
     SMALL(4, 10),
-    /** A 2x2 trunk of quarter logs, drawn as one 32 px column. */
-    QUARTER(15, 32);
+    /** A 2x2 trunk of four logs, quarter logs or plain, drawn as one 32 px column. */
+    GROUP(15, 32);
 
     private final int phases;
     private final int fullWidth;

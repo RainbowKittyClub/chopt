@@ -39,13 +39,13 @@ import club.rainbowkitty.chopt.tree.TimeCurve;
  * sends no new start and keeps punching. Each chopping player works through the current phase on
  * their own, at the rate their tool breaks the log. The first to fill it moves the log to its next
  * phase, or fells the tree, and pays that phase's share of the tool's wear; nobody else's work on
- * that phase counts for anything.
+ * that phase counts for anything. As with a vanilla break, a player who stops chopping a log, or
+ * turns to another, loses what they had done on its phase.
  */
 public final class ChopPoll {
-    /** One phase, in the fixed-point units progress is kept in. */
-    public static final int UNIT = 65536;
+    private static final int UNIT = FellingLogBlockEntity.UNIT;
 
-    // Ticks a player may look away from a log and come back to it without being asked again.
+    // Ticks a player may look away from a log and come back to it, keeping what they have done.
     private static final int CONTINUE_TICKS = 10;
 
     private static final Map<UUID, Chop> CHOPS = new HashMap<>();
@@ -55,13 +55,35 @@ public final class ChopPoll {
     /** Hooks the poll and the event that forgets a player who leaves. */
     public static void register() {
         ServerTickEvents.END_SERVER_TICK.register(ChopPoll::tick);
-        ServerPlayerEvents.LEAVE.register(player -> CHOPS.remove(player.getUUID()));
+        ServerPlayerEvents.LEAVE.register(player -> {
+            Chop chop = CHOPS.remove(player.getUUID());
+            if (chop != null) {
+                forget(chop, player.getUUID());
+            }
+        });
     }
 
     private static void tick(MinecraftServer server) {
         long now = server.getTickCount();
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             visit(server, player, now);
+        }
+        // A player who has not chopped for a while has stopped, and their work on the phase goes.
+        CHOPS.entrySet().removeIf(entry -> {
+            boolean lapsed = now - entry.getValue().tick() > CONTINUE_TICKS;
+            if (lapsed) {
+                forget(entry.getValue(), entry.getKey());
+            }
+            return lapsed;
+        });
+    }
+
+    // Takes a player's progress off the log they were chopping, if it is still there.
+    private static void forget(Chop chop, UUID player) {
+        ServerLevel level = chop.level();
+        if (level.hasChunkAt(chop.master())
+                && level.getBlockEntity(chop.master()) instanceof FellingLogBlockEntity log) {
+            log.clearProgressOf(player);
         }
     }
 
@@ -80,6 +102,9 @@ public final class ChopPoll {
         Chop last = CHOPS.get(player.getUUID());
         boolean continuing = last != null && last.level() == level
                 && last.master().equals(masterPos) && now - last.tick() <= CONTINUE_TICKS;
+        if (last != null && !continuing) {
+            forget(last, player.getUUID());
+        }
         if (!continuing && AttackBlockCallback.EVENT.invoker().interact(player, level,
                 InteractionHand.MAIN_HAND, target, Direction.UP) == InteractionResult.FAIL) {
             return;
@@ -104,7 +129,6 @@ public final class ChopPoll {
         long total = master.progressOf(id) + units;
         if (total < UNIT) {
             master.setProgressOf(id, (int) total);
-            master.save();
             return;
         }
         finishPhase(level, player, masterPos, master, (int) Math.min(total - UNIT, UNIT - 1));
@@ -172,8 +196,8 @@ public final class ChopPoll {
 
     /**
      * The cell whose block entity holds the progress of the log that the felling cell {@code cell}
-     * belongs to: the cell itself, or for a quarter group the northwest cell, found from the
-     * cell's own corner. Null if it cannot be found.
+     * belongs to: the cell itself, or for a 2x2 group the northwest cell, found from the cell's
+     * own corner. Null if it cannot be found.
      */
     public static @Nullable BlockPos masterPosOf(ServerLevel level, BlockPos cell) {
         Chopped chopped = masterOf(level, cell);
@@ -186,14 +210,14 @@ public final class ChopPoll {
                 || own.original() == null) {
             return null;
         }
-        if (own.family() != Family.QUARTER) {
+        if (own.family() != Family.GROUP) {
             return new Chopped(cell, own);
         }
-        Stageable.Corner corner = Stageable.barkSide(own.original());
+        Stageable.Corner corner = own.corner();
         if (corner == null) {
             return null;
         }
-        BlockPos northwest = Stageable.quarterCells(cell, corner).get(0);
+        BlockPos northwest = Stageable.groupCells(cell, corner).get(0);
         return level.getBlockEntity(northwest) instanceof FellingLogBlockEntity master
                 ? new Chopped(northwest, master) : null;
     }

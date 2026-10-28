@@ -26,7 +26,7 @@ import club.rainbowkitty.chopt.ledger.Provenance;
  * cheapest path of each log to the ground.
  *
  * @param family the shape of the cut log
- * @param cluster the logs the cut breaks itself: the log, or a quarter log's four cells
+ * @param cluster the logs the cut breaks itself: the log, or a 2x2 group's four cells
  * @param members every log felled, the cluster included, in (y, x, z) order
  */
 public record Region(Family family, List<BlockPos> cluster, List<BlockPos> members) {
@@ -63,26 +63,25 @@ public record Region(Family family, List<BlockPos> cluster, List<BlockPos> membe
         if (!Provenance.isNatural(level, origin)) {
             return none(family);
         }
-        if (family == Family.QUARTER) {
-            List<BlockPos> group = Stageable.quarterGroup(level, origin, state);
-            return group == null ? none(family) : hangFrom(level, group, family);
+        if (family == Family.GROUP) {
+            Stageable.Group group = Stageable.group(level, origin, state);
+            return group == null ? none(family) : hangFrom(level, group.cells(), family);
         }
         return hangFrom(level, List.of(origin), family);
     }
 
     /**
      * The region of a log already staged, worked out again from the shape it was staged with:
-     * the staged cells no longer carry a quarter log's bark or a pillar's family, so the shape
-     * comes from {@code family} and the stored {@code original} state.
+     * the staged cells no longer say what they were, so the shape comes from {@code family}, and
+     * {@code master} is a group's northwest cell.
      */
-    public static Region ofStaged(ServerLevel level, BlockPos master, Family family,
-            BlockState original) {
+    public static Region ofStaged(ServerLevel level, BlockPos master, Family family) {
         if (!Provenance.isNatural(level, master)) {
             return none(family);
         }
-        Stageable.Corner corner = Stageable.barkSide(original);
-        if (family == Family.QUARTER && corner != null) {
-            return hangFrom(level, Stageable.quarterCells(master, corner), family);
+        if (family == Family.GROUP) {
+            return hangFrom(level, Stageable.groupCells(master, Stageable.Corner.NORTHWEST),
+                    family);
         }
         return hangFrom(level, List.of(master), family);
     }

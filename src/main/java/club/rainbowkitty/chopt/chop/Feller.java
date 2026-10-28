@@ -42,7 +42,7 @@ public final class Feller {
                 || log.original() == null || log.family() == null) {
             return;
         }
-        Region region = Region.ofStaged(level, master, log.family(), log.original());
+        Region region = Region.ofStaged(level, master, log.family());
         List<BlockPos> cluster = region.cluster().isEmpty() ? List.of(master) : region.cluster();
         List<BlockPos> members = region.members().isEmpty() ? cluster : region.members();
         ItemStack tool = finisher.getMainHandItem();

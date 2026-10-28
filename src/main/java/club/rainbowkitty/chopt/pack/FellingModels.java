@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +32,7 @@ import net.minecraft.world.item.component.CustomModelData;
 import net.minecraft.world.level.block.Block;
 
 import club.rainbowkitty.chopt.Chopt;
+import club.rainbowkitty.chopt.display.Cracks;
 import club.rainbowkitty.chopt.tree.Family;
 import club.rainbowkitty.chopt.tree.Stageable;
 
@@ -40,8 +42,9 @@ import club.rainbowkitty.chopt.tree.Stageable;
  * squeezes the log's texture into the narrow width; these models keep the texel size and show the
  * middle of the texture, as a log cut thinner would. The models are found by following each log
  * block's own blockstate and model through the pack being built, so any mod's log whose model is
- * the usual cube, quarter log or small log is covered without being named. A species whose model
- * is anything else is left out and drawn as a block display for everyone.
+ * the usual cube, quarter log or small log is covered without being named. A plain log is covered
+ * twice, standing alone and as one of the four of a 2x2 trunk. A species whose model is anything
+ * else is left out and drawn as a block display for everyone.
  */
 public final class FellingModels {
     private static final Identifier AFTER_DEFAULT = Chopt.id("felling_models");
@@ -53,14 +56,20 @@ public final class FellingModels {
     private static final List<String> SIDES =
             List.of("up", "down", "north", "south", "east", "west");
     private static final String MODELS = "assets/chopt/models/block/felling/";
+    // The start of the names of the shared parents, which the width in pixels ends: a column, a
+    // trunk of Terraform's quarter logs and a trunk of plain logs.
+    private static final String COLUMNS = "chopt:block/felling/w";
+    private static final String QUARTERS = "chopt:block/felling/quarter/w";
+    private static final String SQUARES = "chopt:block/felling/square/w";
 
-    // The species that have models, by block id, in registry order; replaced whole by each build.
-    private static volatile Map<Identifier, Family> defined = Map.of();
+    // The species that have models, by block id, in registry order, each with the families it is
+    // drawn as and the start of its parents' names; replaced whole by each build.
+    private static volatile Map<Identifier, Map<Family, String>> defined = Map.of();
 
     private final ResourcePackBuilder builder;
     private final List<ModContainer> mods =
             new ArrayList<>(FabricLoader.getInstance().getAllMods());
-    private final Map<Identifier, Family> found = new LinkedHashMap<>();
+    private final Map<Identifier, Map<Family, String>> found = new LinkedHashMap<>();
     private final List<String> skipped = new ArrayList<>();
 
     private FellingModels(ResourcePackBuilder builder) {
@@ -69,6 +78,7 @@ public final class FellingModels {
 
     /** Has every main-pack build also carry the felling models, after the default-phase tasks. */
     public static void register() {
+        Cracks.init();
         Event<Consumer<ResourcePackBuilder>> event =
                 PolymerResourcePackUtils.RESOURCE_PACK_AFTER_INITIAL_CREATION_EVENT;
         event.addPhaseOrdering(Event.DEFAULT_PHASE, AFTER_DEFAULT);
@@ -77,29 +87,44 @@ public final class FellingModels {
 
     /** Whether the pack carries models for this stripped log block, drawn as {@code family}. */
     public static boolean defines(Identifier block, Family family) {
-        return defined.get(block) == family;
+        Map<Family, String> families = defined.get(block);
+        return families != null && families.containsKey(family);
     }
 
-    /** The species the last pack build gave models, with the family each is drawn as. */
-    public static Map<Identifier, Family> species() {
+    /** The families the last pack build gave models, by species. */
+    public static Map<Identifier, Map<Family, String>> species() {
         return defined;
     }
 
     /**
-     * The item that shows the cropped model of {@code block} at phase {@code phase}, counted from
-     * 1: a stack whose item model is the species' definition and whose first model number picks
-     * the phase.
+     * The parent model of the cropped model that {@code block} has as {@code family} when
+     * {@code width} pixels across, or null when it has none. The parent holds the shape, which a
+     * crack over the log copies.
      */
-    public static ItemStack stack(Identifier block, int phase) {
+    public static @Nullable Identifier parent(Identifier block, Family family, int width) {
+        Map<Family, String> families = defined.get(block);
+        return families == null || !families.containsKey(family) ? null
+                : Identifier.parse(families.get(family) + width);
+    }
+
+    /**
+     * The item that shows the cropped model of {@code block} at phase {@code phase}, counted from
+     * 1: a stack whose item model is the species' definition for {@code family} and whose first
+     * model number picks the phase.
+     */
+    public static ItemStack stack(Identifier block, Family family, int phase) {
         ItemStack stack = new ItemStack(Items.TRIAL_KEY);
-        stack.set(DataComponents.ITEM_MODEL, itemModel(block));
+        stack.set(DataComponents.ITEM_MODEL, Chopt.id("felling/" + key(block, family)));
         stack.set(DataComponents.CUSTOM_MODEL_DATA,
                 new CustomModelData(List.of((float) phase), List.of(), List.of(), List.of()));
         return stack;
     }
 
-    private static Identifier itemModel(Identifier block) {
-        return Chopt.id("felling/" + block.getNamespace() + "/" + block.getPath());
+    // The path a species' models and item definition go under: a trunk of four logs apart from
+    // the single log of the same block.
+    private static String key(Identifier block, Family family) {
+        return (family == Family.GROUP ? "group/" : "") + block.getNamespace() + "/"
+                + block.getPath();
     }
 
     private static void build(ResourcePackBuilder builder) {
@@ -119,13 +144,18 @@ public final class FellingModels {
         }
     }
 
-    // The shared parents: a square column of each even width, and a quarter trunk of each.
+    // The shared parents: a square column of each even width, and a trunk of each of both kinds.
+    // The cracks over a log copy the shape of its parent, so each is asked for as it is written.
     private void writeParents() {
         for (int width = 2; width <= 14; width += 2) {
             write(MODELS + "w" + width + ".json", pillarParent(width));
+            Cracks.request(Identifier.parse(COLUMNS + width));
         }
         for (int width = 2; width <= 30; width += 2) {
             write(MODELS + "quarter/w" + width + ".json", quarterParent(width / 2));
+            write(MODELS + "square/w" + width + ".json", squareParent(width / 2));
+            Cracks.request(Identifier.parse(QUARTERS + width));
+            Cracks.request(Identifier.parse(SQUARES + width));
         }
     }
 
@@ -138,29 +168,30 @@ public final class FellingModels {
             return;
         }
         try {
-            Family family;
-            Textures textures;
             if (block.getStateDefinition().getProperty("bark_side") != null) {
-                family = Family.QUARTER;
-                textures = quarterTextures(id);
+                add(id, Family.GROUP, QUARTERS, quarterTextures(id));
             } else if (Stageable.isSmall(block.defaultBlockState())) {
-                family = Family.SMALL;
-                textures = smallTextures(id);
+                add(id, Family.SMALL, COLUMNS, smallTextures(id));
             } else if (block.getStateDefinition().getProperty("axis") != null) {
-                family = Family.PILLAR;
-                textures = pillarTextures(id);
-            } else {
-                return;
+                Textures textures = pillarTextures(id);
+                add(id, Family.PILLAR, COLUMNS, textures);
+                add(id, Family.GROUP, SQUARES, textures);
             }
-            if (textures == null) {
-                skipped.add(id.toString());
-                return;
-            }
-            emit(id, family, textures);
-            found.put(id, family);
         } catch (RuntimeException | IOException e) {
             skipped.add(id + " (" + e.getClass().getSimpleName() + ")");
         }
+    }
+
+    // Writes the models of a species as a family, or notes it as left out when it has no textures.
+    private void add(Identifier id, Family family, String parents, @Nullable Textures textures) {
+        if (textures == null) {
+            if (!skipped.contains(id.toString())) {
+                skipped.add(id.toString());
+            }
+            return;
+        }
+        emit(id, family, parents, textures);
+        found.computeIfAbsent(id, key -> new EnumMap<>(Family.class)).put(family, parents);
     }
 
     /** The two texture ids a species' column or trunk is drawn with. */
@@ -450,11 +481,9 @@ public final class FellingModels {
 
     // ---- writing the models ----------------------------------------------------------------
 
-    // The models and item definition of one species.
-    private void emit(Identifier id, Family family, Textures textures) {
-        String key = id.getNamespace() + "/" + id.getPath();
-        String parents = family == Family.QUARTER ? "chopt:block/felling/quarter/w"
-                : "chopt:block/felling/w";
+    // The models and item definition of one species as one family.
+    private void emit(Identifier id, Family family, String parents, Textures textures) {
+        String key = key(id, family);
         List<String> entries = new ArrayList<>();
         for (int phase = 1; phase <= family.phases(); phase++) {
             write(MODELS + key + "/" + phase + ".json", "{\"parent\":\"" + parents
@@ -512,6 +541,45 @@ public final class FellingModels {
                         face("south", b, 0), face("east", a, 0)) + ","
                 + quadrant(8 - h, 8, 8, 8 + h, face("up", top, 0), face("down", top, 90),
                         face("south", a, 0), face("west", b, 0)) + "]}";
+    }
+
+    // A trunk of four plain logs whose half width is {@code h}: a box in each quarter about the
+    // middle of the block. Each shows, on its two outer sides and its ends, the window of its own
+    // block's texture that vanilla would give a box of that size at the block's corner nearest the
+    // middle, so the trunk looks like the real one with the outer pixels sliced off.
+    private static String squareParent(int h) {
+        int lo = 16 - h;
+        return "{\"textures\":{\"particle\":\"#side\"},\"elements\":["
+                + plainBox(8 - h, 8 - h, lo, lo, 16, 16, "north", "west") + ","
+                + plainBox(8, 8 - h, 0, lo, h, 16, "north", "east") + ","
+                + plainBox(8, 8, 0, 0, h, h, "south", "east") + ","
+                + plainBox(8 - h, 8, lo, 0, 16, h, "south", "west") + "]}";
+    }
+
+    // The box at ({@code mx}, {@code mz}) in the model that stands at x0..x1 and z0..z1 of its own
+    // block, with the faces named and the ends.
+    private static String plainBox(int mx, int mz, int x0, int z0, int x1, int z1,
+            String... sides) {
+        List<String> faces = new ArrayList<>();
+        faces.add(plainFace("up", x0, z0, x1, z1));
+        faces.add(plainFace("down", x0, z0, x1, z1));
+        for (String side : sides) {
+            faces.add(plainFace(side, x0, z0, x1, z1));
+        }
+        return quadrant(mx, mz, mx + (x1 - x0), mz + (z1 - z0), faces.toArray(String[]::new));
+    }
+
+    // One face with vanilla's default uv for a box over the block's whole height.
+    private static String plainFace(String name, int x0, int z0, int x1, int z1) {
+        int[] uv = switch (name) {
+            case "down" -> new int[] {x0, 16 - z1, x1, 16 - z0};
+            case "up" -> new int[] {x0, z0, x1, z1};
+            case "north" -> new int[] {16 - x1, 0, 16 - x0, 16};
+            case "south" -> new int[] {x0, 0, x1, 16};
+            case "west" -> new int[] {z0, 0, z1, 16};
+            default -> new int[] {16 - z1, 0, 16 - z0, 16};
+        };
+        return face(name, "[" + uv[0] + "," + uv[1] + "," + uv[2] + "," + uv[3] + "]", 0);
     }
 
     private static String quadrant(int x0, int z0, int x1, int z1, String... faces) {

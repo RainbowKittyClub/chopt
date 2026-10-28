@@ -24,7 +24,7 @@ import club.rainbowkitty.chopt.tree.Stageable;
 /**
  * {@code /chopt probe felling <pos> <block state> <phase>}: makes the log a felling log in the
  * given phase, as the conversion will, for testing the block alone. A small-log state is a small
- * family, anything else a pillar; a quarter group needs its four cells and is not made here.
+ * family, anything else a pillar; a 2x2 group needs its four cells and is not made here.
  */
 final class FellingProbe {
     private FellingProbe() {}
@@ -47,7 +47,7 @@ final class FellingProbe {
         int phase = Math.min(IntegerArgumentType.getInteger(context, "phase"), family.phases());
         // The strip rules read the block at the position, so the log has to be there first.
         level.setBlock(pos, original, Block.UPDATE_ALL);
-        FellingLogBlock.stage(level, pos, original, family, family.phases(), 0);
+        FellingLogBlock.stage(level, pos, original, family, null, family.phases(), 0);
         BlockState felling = level.getBlockState(pos);
         level.setBlock(pos, felling.setValue(FellingLogBlock.PHASE, phase), Block.UPDATE_ALL);
         context.getSource().sendSuccess(() -> Component.literal("felling log at "

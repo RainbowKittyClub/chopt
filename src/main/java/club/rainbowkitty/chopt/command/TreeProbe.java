@@ -99,7 +99,9 @@ final class TreeProbe {
         say(source, "  natural: " + verdict.natural() + ", stripped: "
                 + BuiltInRegistries.BLOCK.getKey(Strip.of(level, pos, state).getBlock()));
         say(source, "  region: " + region.members().size() + " logs, n = " + region.n()
-                + ", cluster " + region.cluster().size());
+                + ", cluster " + region.cluster().size()
+                + (region.cluster().size() > 1 ? " from " + region.cluster().get(0).toShortString()
+                        : ""));
         say(source, "  canopy: " + verdict.canopy() + ", stageable: " + verdict.stageable());
         if (family != null && source.getEntity() instanceof ServerPlayer player) {
             double base = state.getDestroyProgress(player, level, pos);

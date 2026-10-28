@@ -38,12 +38,15 @@ public final class Stageable {
 
     private Stageable() {}
 
-    /** The corners of a 2x2 trunk, as a quarter log's {@code bark_side} names them. */
+    /**
+     * The corners of a 2x2 trunk, as a quarter log's {@code bark_side} names them. In this order
+     * they go clockwise from the northwest, which is the order of a group's cells.
+     */
     public enum Corner {
         NORTHWEST, NORTHEAST, SOUTHEAST, SOUTHWEST;
 
-        // The corner a serialized bark side names, or null.
-        static @Nullable Corner named(String name) {
+        /** The corner a serialized bark side or saved name stands for, or null. */
+        public static @Nullable Corner named(String name) {
             for (Corner corner : values()) {
                 if (corner.name().equalsIgnoreCase(name)) {
                     return corner;
@@ -56,14 +59,15 @@ public final class Stageable {
     /**
      * The family of the log {@code state} at {@code pos}, or null when it is not staged: not a
      * log, kept out by the tag, already stripped, a leafy small log, or a quarter log whose 2x2
-     * group is not whole. Reads neighbouring chunks only where they are loaded.
+     * group is not whole. An upright plain log that stands in a whole 2x2 group is part of it.
+     * Reads neighbouring chunks only where they are loaded.
      */
     public static @Nullable Family family(Level level, BlockPos pos, BlockState state) {
         if (!state.is(BlockTags.LOGS) || state.is(NEVER_STAGED)) {
             return null;
         }
         if (barkSide(state) != null) {
-            return quarterGroup(level, pos, state) != null ? Family.QUARTER : null;
+            return group(level, pos, state) != null ? Family.GROUP : null;
         }
         if (!Strip.strips(level, pos, state)) {
             return null;
@@ -72,7 +76,10 @@ public final class Stageable {
             return isLeafy(state) ? null : Family.SMALL;
         }
         boolean fullCube = Block.isShapeFullBlock(state.getShape(level, pos));
-        return state.getBlock() instanceof RotatedPillarBlock && fullCube ? Family.PILLAR : null;
+        if (!(state.getBlock() instanceof RotatedPillarBlock) || !fullCube) {
+            return null;
+        }
+        return group(level, pos, state) != null ? Family.GROUP : Family.PILLAR;
     }
 
     /** Whether {@code state} is a small log: the Terraform shape, with arms on every side. */
@@ -132,10 +139,10 @@ public final class Stageable {
     }
 
     /**
-     * The four cells of the 2x2 trunk that the cell at {@code pos}, whose bark faces
-     * {@code corner}, belongs to: northwest first and then clockwise.
+     * The four cells of the 2x2 trunk that the cell at {@code pos}, which sits at {@code corner} of
+     * it, belongs to: northwest first and then clockwise.
      */
-    public static List<BlockPos> quarterCells(BlockPos pos, Corner corner) {
+    public static List<BlockPos> groupCells(BlockPos pos, Corner corner) {
         int east = corner == Corner.NORTHEAST || corner == Corner.SOUTHEAST ? 1 : 0;
         int south = corner == Corner.SOUTHEAST || corner == Corner.SOUTHWEST ? 1 : 0;
         BlockPos northwest = pos.offset(-east, 0, -south);
@@ -143,17 +150,69 @@ public final class Stageable {
     }
 
     /**
-     * The four cells of the 2x2 trunk the quarter log at {@code pos} belongs to, northwest first
-     * and then clockwise, or null when the group is not whole: a cell unloaded, broken, not
-     * upright, facing the wrong corner, placed rather than natural, or stripping differently.
+     * A whole 2x2 trunk.
+     *
+     * @param cells its four cells, northwest first and then clockwise
+     * @param corner the corner the queried cell sits at
      */
-    public static @Nullable List<BlockPos> quarterGroup(Level level, BlockPos pos,
-            BlockState state) {
-        Corner corner = barkSide(state);
-        if (corner == null || !isVertical(state)) {
+    public record Group(List<BlockPos> cells, Corner corner) {}
+
+    /**
+     * The 2x2 trunk the upright log {@code state} at {@code pos} belongs to, or null when there is
+     * none whole: a cell unloaded, broken, not upright, placed rather than natural, or stripping
+     * differently. A quarter log's corner is the one its bark faces. A plain log takes itself as
+     * northwest, northeast, southeast and then southwest of a square whose four cells are all the
+     * same block, and joins the whole square with the fewest upright logs touching its sides, the
+     * first of them on a tie, so two trunks that touch are each their own group whichever cell is
+     * cut.
+     */
+    public static @Nullable Group group(Level level, BlockPos pos, BlockState state) {
+        if (!isVertical(state)) {
             return null;
         }
-        List<BlockPos> cells = quarterCells(pos, corner);
+        Corner bark = barkSide(state);
+        if (bark != null) {
+            return squareAt(level, pos, bark, state.getBlock(), true);
+        }
+        if (!(state.getBlock() instanceof RotatedPillarBlock)) {
+            return null;
+        }
+        Group best = null;
+        int fewest = Integer.MAX_VALUE;
+        for (Corner corner : Corner.values()) {
+            Group found = squareAt(level, pos, corner, state.getBlock(), false);
+            int touching = found == null ? fewest : touching(level, found.cells());
+            if (touching < fewest) {
+                best = found;
+                fewest = touching;
+            }
+        }
+        return best;
+    }
+
+    // How many upright logs stand against the sides of a square, outside it.
+    private static int touching(Level level, List<BlockPos> cells) {
+        int count = 0;
+        for (BlockPos cell : cells) {
+            for (Direction side : Direction.Plane.HORIZONTAL) {
+                BlockPos next = cell.relative(side);
+                if (!cells.contains(next) && level.hasChunkAt(next)) {
+                    BlockState there = level.getBlockState(next);
+                    if (there.is(BlockTags.LOGS) && isVertical(there)) {
+                        count++;
+                    }
+                }
+            }
+        }
+        return count;
+    }
+
+    // The square that has {@code pos} at {@code corner}, if all four of its cells are natural,
+    // upright logs that strip to one block: quarter logs each facing its own corner, or plain logs
+    // that are all {@code block}.
+    private static @Nullable Group squareAt(Level level, BlockPos pos, Corner corner, Block block,
+            boolean quarter) {
+        List<BlockPos> cells = groupCells(pos, corner);
         Corner[] expected = Corner.values();
         Block stripped = null;
         for (int i = 0; i < 4; i++) {
@@ -162,9 +221,10 @@ public final class Stageable {
                 return null;
             }
             BlockState cellState = level.getBlockState(cell);
-            if (!cellState.is(BlockTags.LOGS) || cellState.is(NEVER_STAGED)
-                    || barkSide(cellState) != expected[i] || !isVertical(cellState)
-                    || !Provenance.isNatural(level, cell)) {
+            boolean shape = quarter ? barkSide(cellState) == expected[i]
+                    : cellState.getBlock() == block;
+            if (!cellState.is(BlockTags.LOGS) || cellState.is(NEVER_STAGED) || !shape
+                    || !isVertical(cellState) || !Provenance.isNatural(level, cell)) {
                 return null;
             }
             Block target = Strip.of(level, cell, cellState).getBlock();
@@ -173,6 +233,6 @@ public final class Stageable {
             }
             stripped = target;
         }
-        return cells;
+        return new Group(cells, corner);
     }
 }
