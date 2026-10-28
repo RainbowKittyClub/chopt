@@ -51,10 +51,10 @@ import club.rainbowkitty.chopt.tree.Strip;
 /**
  * A log being felled. To every client it is a barrier, so its outline and collision never change
  * as the phases go by; the shrinking log is a display inside it (S7). The block entity holds the
- * log it was. A vanilla break of this block gives that log back, so a sneaking player, a bare
- * hand, a tool that cannot chop or another mod breaks it as the plain log it was. A cell of a 2x2
- * group is the exception for a player in survival: a chop tool chops it even while sneaking, and
- * a bare hand cannot break it ({@code GroupBreaks}).
+ * log it was. A vanilla break of this block gives that log back, so a sneaking player or another
+ * mod breaks it as the plain log it was; any other player in survival chops it. A cell of a 2x2
+ * group is the exception: it is chopped even while sneaking, and a plain break is refused
+ * ({@code GroupBreaks}).
  */
 public class FellingLogBlock extends BarrierBlock
         implements PolymerBlock, EntityBlock, BlockWithElementHolder {
@@ -286,7 +286,7 @@ public class FellingLogBlock extends BarrierBlock
         }
         int idle = ChoptSettings.IDLE_REVERT_TICKS.get(level.getServer());
         long quiet = now - owner.lastHit();
-        if (quiet >= idle && owner.paid() == 0) {
+        if (quiet >= idle && !owner.worn()) {
             revert(level, pos, entity.original());
         } else {
             long wait = Math.max(20L, Math.min(idle - quiet, IDLE_RECHECK));

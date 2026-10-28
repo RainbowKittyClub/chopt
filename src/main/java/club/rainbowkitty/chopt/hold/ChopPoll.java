@@ -7,15 +7,22 @@ import java.util.UUID;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
+import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import org.jspecify.annotations.Nullable;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
@@ -50,17 +57,35 @@ public final class ChopPoll {
 
     private static final Map<UUID, Chop> CHOPS = new HashMap<>();
 
+    // Ticks a swing outlasts the use or attack that made it. A right-click that places or uses an
+    // item, and a punch at a mob, swing the arm as a chop does, and are not one.
+    private static final int SWING_TICKS = 8;
+    private static final Map<UUID, Long> LAST_ACTION = new HashMap<>();
+
     private ChopPoll() {}
 
     /** Hooks the poll and the event that forgets a player who leaves. */
     public static void register() {
         ServerTickEvents.END_SERVER_TICK.register(ChopPoll::tick);
+        UseBlockCallback.EVENT.register((player, world, hand, hit) -> note(player));
+        UseItemCallback.EVENT.register((player, world, hand) -> note(player));
+        UseEntityCallback.EVENT.register((player, world, hand, entity, hit) -> note(player));
+        AttackEntityCallback.EVENT.register((player, world, hand, entity, hit) -> note(player));
         ServerPlayerEvents.LEAVE.register(player -> {
+            LAST_ACTION.remove(player.getUUID());
             Chop chop = CHOPS.remove(player.getUUID());
             if (chop != null) {
                 forget(chop, player.getUUID());
             }
         });
+    }
+
+    // Remembers that the player has just used something or hit a mob, and lets the action go on.
+    private static InteractionResult note(Player player) {
+        if (player instanceof ServerPlayer server) {
+            LAST_ACTION.put(player.getUUID(), (long) server.level().getServer().getTickCount());
+        }
+        return InteractionResult.PASS;
     }
 
     private static void tick(MinecraftServer server) {
@@ -78,6 +103,19 @@ public final class ChopPoll {
         });
     }
 
+    // Whether two stacks are the same item with the same components, wear aside, as a break in
+    // progress sees it: repairing a tool, or wearing it out, is not changing it.
+    private static boolean sameItem(ItemStack a, ItemStack b) {
+        if (a.isEmpty() || b.isEmpty()) {
+            return a.isEmpty() && b.isEmpty();
+        }
+        ItemStack unworn = a.copy();
+        ItemStack other = b.copy();
+        unworn.remove(DataComponents.DAMAGE);
+        other.remove(DataComponents.DAMAGE);
+        return ItemStack.isSameItemSameComponents(unworn, other);
+    }
+
     // Takes a player's progress off the log they were chopping, if it is still there.
     private static void forget(Chop chop, UUID player) {
         ServerLevel level = chop.level();
@@ -89,12 +127,14 @@ public final class ChopPoll {
 
     private static void visit(MinecraftServer server, ServerPlayer player, long now) {
         ServerLevel level = player.level();
-        boolean tool = player.isAlive() && player.gameMode.isSurvival()
-                && ChopTool.isChopTool(player.getMainHandItem());
-        if (tool) {
+        boolean chopper = player.isAlive() && ChopTool.survival(player);
+        if (chopper) {
             clearVanillaMining(player, level);
         }
-        BlockPos target = tool && swinging(player) ? aimedFelling(level, player) : null;
+        Long acted = LAST_ACTION.get(player.getUUID());
+        boolean settled = acted == null || now - acted > SWING_TICKS;
+        boolean chopping = chopper && settled && swinging(player);
+        BlockPos target = chopping ? aimedFelling(level, player) : null;
         if (target != null && !ChopTool.chopsAt(player, level, target)) {
             target = null;
         }
@@ -104,8 +144,10 @@ public final class ChopPoll {
         }
         BlockPos masterPos = chopped.pos();
         Chop last = CHOPS.get(player.getUUID());
+        // A different item in hand is a new break, as it is in vanilla.
         boolean continuing = last != null && last.level() == level
-                && last.master().equals(masterPos) && now - last.tick() <= CONTINUE_TICKS;
+                && last.master().equals(masterPos) && now - last.tick() <= CONTINUE_TICKS
+                && sameItem(last.tool(), player.getMainHandItem());
         if (last != null && !continuing) {
             forget(last, player.getUUID());
         }
@@ -113,8 +155,9 @@ public final class ChopPoll {
                 InteractionHand.MAIN_HAND, target, Direction.UP) == InteractionResult.FAIL) {
             return;
         }
-        CHOPS.put(player.getUUID(), new Chop(level, masterPos, now));
         credit(server, player, level, masterPos, chopped.entity(), now);
+        CHOPS.put(player.getUUID(),
+                new Chop(level, masterPos, now, player.getMainHandItem().copy()));
     }
 
     // Adds one tick of this player's work to their own progress on the log, and finishes the phase
@@ -152,8 +195,13 @@ public final class ChopPoll {
         int logs = master.logsAbove() + 1;
         int owed = Durability.shareThrough(logs, stage, master.phases()) - master.paid();
         if (owed > 0) {
-            master.setPaid(master.paid()
-                    + Durability.charge(player, player.getMainHandItem(), owed));
+            ItemStack tool = player.getMainHandItem();
+            boolean wears = ChopTool.wears(tool);
+            int covered = Durability.charge(player, tool, owed);
+            master.setPaid(master.paid() + covered);
+            if (wears && covered > 0) {
+                master.markWorn();
+            }
         }
         master.startNextPhase(player.getUUID(), carried);
         FellingLogBlock.advance(level, masterPos, master);
@@ -236,6 +284,6 @@ public final class ChopPoll {
     // A log being chopped, and the cell that holds its progress.
     private record Chopped(BlockPos pos, FellingLogBlockEntity entity) {}
 
-    // The log a player was last credited on, and when.
-    private record Chop(ServerLevel level, BlockPos master, long tick) {}
+    // The log a player was last credited on, when, and with what in hand.
+    private record Chop(ServerLevel level, BlockPos master, long tick, ItemStack tool) {}
 }

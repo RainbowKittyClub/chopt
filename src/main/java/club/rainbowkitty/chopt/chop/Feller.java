@@ -5,6 +5,7 @@ import java.util.List;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.stats.Stats;
@@ -47,19 +48,20 @@ public final class Feller {
         List<BlockPos> members = region.members().isEmpty() ? cluster : region.members();
         ItemStack tool = finisher.getMainHandItem();
         Item toolItem = tool.getItem();
+        // As vanilla counts a use: only an item with a tool component, even one this wears out.
+        boolean tooled = tool.get(DataComponents.TOOL) != null;
 
         // Counted again now, so what is owed is judged against the tree as it stands.
         log.setLogsAbove(members.size() - 1);
         int nested = nestedPaid(level, members, cluster);
-        // A finisher with nothing in hand pays nothing, and the rest is not theirs to fell.
         int top = Math.max(0, members.size() - log.paid() - nested);
-        if (!tool.isEmpty()) {
-            log.setPaid(log.paid() + Durability.charge(finisher, tool, top));
-        }
+        log.setPaid(log.paid() + Durability.charge(finisher, tool, top));
         int allowed = Math.max(cluster.size(), Math.min(members.size(), log.paid() + nested));
 
         Falls.start(level, finisher, tool, cluster, members, allowed);
-        finisher.awardStat(Stats.ITEM_USED.get(toolItem));
+        if (tooled) {
+            finisher.awardStat(Stats.ITEM_USED.get(toolItem));
+        }
     }
 
     // What the other felling logs in the region have already been charged for.

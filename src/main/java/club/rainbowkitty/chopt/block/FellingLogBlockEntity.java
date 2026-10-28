@@ -33,6 +33,7 @@ public final class FellingLogBlockEntity extends BlockEntity {
     private static final String LOGS_ABOVE = "logs_above";
     private static final String LAST_HIT = "last_hit";
     private static final String PAID = "paid";
+    private static final String WORN = "worn";
     // The stages a crack goes through on the way to a phase's end, as vanilla's break does.
     private static final int CRACK_STAGES = 10;
 
@@ -49,6 +50,7 @@ public final class FellingLogBlockEntity extends BlockEntity {
     private final Map<UUID, Integer> progress = new HashMap<>();
     private long lastHit;
     private int paid;
+    private boolean worn;
 
     public FellingLogBlockEntity(BlockPos pos, BlockState state) {
         super(ChoptBlocks.FELLING_LOG_ENTITY, pos, state);
@@ -183,6 +185,19 @@ public final class FellingLogBlockEntity extends BlockEntity {
         this.paid = paid;
     }
 
+    /**
+     * Whether a tool has actually worn down for this log. Paid blocks are not all wear: a fist or
+     * a stick covers them for nothing, and a log nothing has worn for may revert when abandoned.
+     */
+    public boolean worn() {
+        return worn;
+    }
+
+    /** Records that a tool has worn down for this log. */
+    public void markWorn() {
+        this.worn = true;
+    }
+
     /** Saves a change to the chunk, which a bare {@code setChanged} would not. */
     public void save() {
         if (level != null) {
@@ -205,6 +220,7 @@ public final class FellingLogBlockEntity extends BlockEntity {
         this.logsAbove = input.getIntOr(LOGS_ABOVE, 0);
         this.lastHit = input.getLongOr(LAST_HIT, 0L);
         this.paid = input.getIntOr(PAID, 0);
+        this.worn = input.getBooleanOr(WORN, paid > 0);
     }
 
     @Override
@@ -222,6 +238,7 @@ public final class FellingLogBlockEntity extends BlockEntity {
         output.putInt(LOGS_ABOVE, logsAbove);
         output.putLong(LAST_HIT, lastHit);
         output.putInt(PAID, paid);
+        output.putBoolean(WORN, worn);
     }
 
     // The family a saved name stands for, or null for one a later version dropped.

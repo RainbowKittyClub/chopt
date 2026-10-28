@@ -6,23 +6,31 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.Tool;
 import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.GameType;
 
 import club.rainbowkitty.chopt.block.FellingLogBlockEntity;
 import club.rainbowkitty.chopt.tree.Family;
 
 /**
- * Which tools chop. Any tool vanilla charges durability to for breaking a block does: an axe,
- * pickaxe, shovel, hoe or sword of any material, or a modded tool built the same way. A bare hand,
- * a stack with no tool component and an unbreakable tool have nothing to charge, so they break a
- * log as one plain block.
+ * Who chops, and what a chop costs. A player in survival chops with whatever they hold, a fist
+ * included, at the speed that item breaks the log. Only a tool vanilla charges durability to for
+ * breaking a block wears down, at its own rate; a bare hand, a stick or an unbreakable tool chop
+ * for nothing.
  */
 public final class ChopTool {
     private ChopTool() {}
 
-    /** Whether {@code stack} is a tool vanilla wears down for a block it breaks. */
-    public static boolean isChopTool(ItemStack stack) {
-        Tool tool = stack.get(DataComponents.TOOL);
-        return tool != null && tool.damagePerBlock() > 0 && stack.isDamageableItem();
+    /**
+     * Whether {@code player} is in survival, which is the only mode that chops. Adventure is not:
+     * vanilla's own checks keep it from breaking blocks it may not.
+     */
+    public static boolean survival(ServerPlayer player) {
+        return player.gameMode.getGameModeForPlayer() == GameType.SURVIVAL;
+    }
+
+    /** Whether {@code stack} wears down for a block it breaks, as vanilla charges a tool. */
+    public static boolean wears(ItemStack stack) {
+        return damagePerBlock(stack) > 0 && stack.isDamageableItem();
     }
 
     /** The durability one broken block costs {@code stack}: its tool component's rate. */
@@ -31,10 +39,9 @@ public final class ChopTool {
         return tool == null ? 0 : tool.damagePerBlock();
     }
 
-    /** Whether {@code player} chops: in survival, not sneaking, with a chop tool in hand. */
+    /** Whether {@code player} chops: in survival and not sneaking. */
     public static boolean chops(ServerPlayer player) {
-        return player.gameMode.isSurvival() && !player.isShiftKeyDown()
-                && isChopTool(player.getMainHandItem());
+        return survival(player) && !player.isShiftKeyDown();
     }
 
     /**
@@ -43,7 +50,7 @@ public final class ChopTool {
      * group is not broken up by hand, so it is chopped whether the player sneaks or not.
      */
     public static boolean chopsAt(ServerPlayer player, BlockGetter level, BlockPos pos) {
-        if (!player.gameMode.isSurvival() || !isChopTool(player.getMainHandItem())) {
+        if (!survival(player)) {
             return false;
         }
         return !player.isShiftKeyDown()

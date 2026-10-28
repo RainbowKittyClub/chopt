@@ -18,9 +18,9 @@ import club.rainbowkitty.chopt.block.FellingLogBlockEntity;
 import club.rainbowkitty.chopt.tree.Family;
 
 /**
- * A 2x2 group that has been started is not broken up by hand. A player in survival with a chop tool
- * chops it even while sneaking ({@link ChopTool#chopsAt}), at the pace of any chop. What reaches
- * here is a plain break of one of its cells by a player who cannot chop, such as a bare hand: it
+ * A 2x2 group that has been started is not broken up by hand. A player in survival chops it even
+ * while sneaking ({@link ChopTool#chopsAt}), with whatever they hold, at the pace of any chop. What
+ * reaches here is a plain break of one of its cells by code that breaks it for a player, which
  * would drop that cell's log and leave the other three to revert, so it is refused. Creative
  * players still break a cell as plain, so a group can always be cleared. Runs after the default
  * phase, so a claim that refuses the break refuses it first.
@@ -42,7 +42,7 @@ public final class GroupBreaks {
                 && BreakScope.current() == breaker && !Cascade.active()
                 && state.getBlock() instanceof FellingLogBlock
                 && blockEntity instanceof FellingLogBlockEntity log && log.family() == Family.GROUP
-                && breaker.gameMode.isSurvival();
+                && !breaker.gameMode.isCreative();
         return !refused;
     }
 }
