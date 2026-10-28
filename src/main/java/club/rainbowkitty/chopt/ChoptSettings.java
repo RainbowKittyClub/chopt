@@ -34,14 +34,14 @@ public final class ChoptSettings {
      * {@code m(n) = min(cap, 1 + linear / 100 * n + weight * ln(1 + n))}.
      */
     public static final Setting<Integer> CURVE_LINEAR_HUNDREDTHS =
-            range("curve_linear_hundredths", 12, 0, 1000);
+            range("curve_linear_hundredths", 100, 0, 1000);
 
     /** The time curve's logarithmic weight, in vanilla breaks. */
     public static final Setting<Integer> CURVE_LOGARITHMIC_WEIGHT =
-            range("curve_logarithmic_weight", 2, 0, 100);
+            range("curve_logarithmic_weight", 0, 0, 100);
 
     /** The time curve's ceiling, in vanilla breaks, so a huge tree is never longer than this. */
-    public static final Setting<Integer> CURVE_CAP = range("curve_cap", 32, 2, 1000);
+    public static final Setting<Integer> CURVE_CAP = range("curve_cap", 1000, 2, 1000);
 
     /**
      * Ticks a felling log may sit untouched before it reverts to the log it was, when nothing
