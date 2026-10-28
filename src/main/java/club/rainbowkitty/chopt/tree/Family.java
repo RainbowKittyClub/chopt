@@ -11,19 +11,46 @@ public enum Family {
     /** A 10 px small log, drawn as a column along its main axis. */
     SMALL(4, 10),
     /** A 2x2 trunk of four logs, quarter logs or plain, drawn as one 32 px column. */
-    GROUP(15, 32);
+    GROUP(15, 32, 2),
+    /** A 3x3 trunk of nine plain logs, drawn as one 48 px column. */
+    GROUP3(23, 48, 3);
 
     private final int phases;
     private final int fullWidth;
+    private final int size;
 
     Family(int phases, int fullWidth) {
+        this(phases, fullWidth, 1);
+    }
+
+    Family(int phases, int fullWidth, int size) {
         this.phases = phases;
         this.fullWidth = fullWidth;
+        this.size = size;
+    }
+
+    /** How many logs the shape is across: 1 for a log of its own, 2 or 3 for a trunk of several. */
+    public int size() {
+        return size;
+    }
+
+    /** Whether the shape is a trunk of several logs, felled together. */
+    public boolean isGroup() {
+        return size > 1;
     }
 
     /** How many phases a felling goes through. */
     public int phases() {
         return phases;
+    }
+
+    /** The most phases any shape goes through, which the block's phase state has room for. */
+    public static int mostPhases() {
+        int most = 0;
+        for (Family family : values()) {
+            most = Math.max(most, family.phases);
+        }
+        return most;
     }
 
     /** The width in pixels of phase {@code phase}, counted from 1. */

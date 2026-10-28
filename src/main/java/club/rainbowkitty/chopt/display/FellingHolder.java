@@ -135,10 +135,10 @@ public final class FellingHolder extends ElementHolder {
         return null;
     }
 
-    // The species of one log, or of the group it heads when it is a quarter log.
+    // The species of one log, or of the group it heads when it is the northwest cell of one.
     private @Nullable Species speciesOf(ServerLevel level, BlockPos pos, Family family,
             BlockState stripped) {
-        return family == Family.GROUP ? groupSpecies(level, pos)
+        return family.isGroup() ? groupSpecies(level, pos)
                 : new Species(family, List.of(stripped), blockOf(stripped));
     }
 
@@ -158,29 +158,37 @@ public final class FellingHolder extends ElementHolder {
         drawnPhase = -1;
     }
 
-    // A group's four stripped looks, northwest first, or null until every cell is staged. A cell
-    // that is not the northwest one draws nothing.
+    // A group's stripped looks, row by row from the northwest, or null until every cell is staged.
+    // A cell that is not the northwest one draws nothing.
     private @Nullable Species groupSpecies(ServerLevel level, BlockPos pos) {
         if (!(level.getBlockEntity(pos) instanceof FellingLogBlockEntity self)
-                || self.original() == null) {
+                || self.original() == null || self.family() == null) {
             return null;
         }
-        Stageable.Corner corner = self.corner();
-        if (corner == null) {
+        Stageable.Cell place = self.cell();
+        if (place == null) {
             return null;
         }
-        if (corner != Stageable.Corner.NORTHWEST) {
-            return new Species(Family.GROUP, List.of(), null);
+        Family family = self.family();
+        if (!place.master()) {
+            return new Species(family, List.of(), null);
         }
         List<BlockState> looks = new ArrayList<>();
-        for (BlockPos cell : Stageable.groupCells(pos, corner)) {
+        for (BlockPos cell : Stageable.groupCells(pos, family.size(), place)) {
             if (!(level.getBlockEntity(cell) instanceof FellingLogBlockEntity other)
                     || other.stripped() == null) {
                 return null;
             }
             looks.add(other.stripped());
         }
-        return new Species(Family.GROUP, looks, blockOf(looks.get(0)));
+        return new Species(family, looks, blockOf(looks.get(0)));
+    }
+
+    // Where the middle of a group is from its northwest cell's centre: half a block east and
+    // south for a 2x2 trunk, a whole block for a 3x3 one.
+    private static Vec3 groupMiddle(Family family) {
+        double along = (family.size() - 1) / 2.0;
+        return new Vec3(along, 0.0, along);
     }
 
     // Sets the elements for one phase: built the first time, then only moved and resized, so a
@@ -189,16 +197,21 @@ public final class FellingHolder extends ElementHolder {
         if (looks.stripped().isEmpty()) {
             return;
         }
-        if (looks.family() == Family.GROUP) {
-            float s = Family.GROUP.width(phase) / 32.0F;
-            float[][] cells = {{-1, -1}, {0, -1}, {0, 0}, {-1, 0}};
-            // The holder sits at the northwest cell's centre, and the group's middle is the corner
-            // it shares with the other three: half a block east and south of that.
-            for (int i = 0; i < 4; i++) {
+        if (looks.family().isGroup()) {
+            int size = looks.family().size();
+            float s = looks.family().width(phase) / (16.0F * size);
+            // The holder sits at the northwest cell's centre. Each cell is drawn s of a block
+            // wide, in its place about the group's middle, which is (size - 1) / 2 blocks east
+            // and south of that centre: cell c spans (c - size / 2) * s to (c - size / 2 + 1) * s
+            // from the middle.
+            float middle = (size - 1) / 2.0F;
+            for (int i = 0; i < looks.stripped().size(); i++) {
+                Stageable.Cell place = Stageable.Cell.of(i, size);
                 place(looks, i, looks.stripped().get(i), new Vector3f(s, 1.0F, s),
-                        new Vector3f(0.5F + cells[i][0] * s, -0.5F, 0.5F + cells[i][1] * s));
+                        new Vector3f(middle + (place.col() - size / 2.0F) * s, -0.5F,
+                                middle + (place.row() - size / 2.0F) * s));
             }
-            crop(looks, Direction.Axis.Y, phase, new Vec3(0.5, 0.0, 0.5));
+            crop(looks, Direction.Axis.Y, phase, groupMiddle(looks.family()));
             return;
         }
         float s = looks.family().width(phase) / (looks.family() == Family.SMALL ? 10.0F : 16.0F);
@@ -278,7 +291,7 @@ public final class FellingHolder extends ElementHolder {
         crackPhase = drawnPhase;
         boolean drawn = cropKnown && drawnPhase >= 0 && species != null
                 && species.block() != null;
-        Identifier shape = stage < 0 || !drawn ? null : FellingModels.parent(species.block(),
+        Identifier shape = stage < 0 || !drawn ? null : FellingModels.crackShape(species.block(),
                 species.family(), species.family().width(drawnPhase));
         ItemStack cracks = shape == null ? null : Cracks.stack(shape, stage);
         if (cracks == null) {
@@ -289,7 +302,7 @@ public final class FellingHolder extends ElementHolder {
         }
         if (crack == null) {
             crack = modelDisplay(drawnAxis,
-                    species.family() == Family.GROUP ? new Vec3(0.5, 0.0, 0.5) : Vec3.ZERO);
+                    species.family().isGroup() ? groupMiddle(species.family()) : Vec3.ZERO);
             addElement(crack);
         }
         crack.setItem(cracks);

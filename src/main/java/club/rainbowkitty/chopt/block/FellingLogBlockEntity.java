@@ -29,6 +29,9 @@ public final class FellingLogBlockEntity extends BlockEntity {
     private static final String PHASES = "phases";
     private static final String ORIGINAL = "original";
     private static final String STRIPPED = "stripped";
+    private static final String COL = "col";
+    private static final String ROW = "row";
+    // The name of a 2x2 trunk's corner, which older saves kept in place of a column and row.
     private static final String CORNER = "corner";
     private static final String LOGS_ABOVE = "logs_above";
     private static final String LAST_HIT = "last_hit";
@@ -44,7 +47,7 @@ public final class FellingLogBlockEntity extends BlockEntity {
     private int phases = 1;
     private @Nullable BlockState original;
     private @Nullable BlockState stripped;
-    private Stageable.@Nullable Corner corner;
+    private Stageable.@Nullable Cell cell;
     private int logsAbove;
     // Not saved: in 1/65536 of the current phase, for each player who is still chopping.
     private final Map<UUID, Integer> progress = new HashMap<>();
@@ -62,7 +65,7 @@ public final class FellingLogBlockEntity extends BlockEntity {
         this.phases = pending.phases();
         this.original = pending.original();
         this.stripped = pending.stripped();
-        this.corner = pending.corner();
+        this.cell = pending.cell();
         this.logsAbove = pending.logsAbove();
     }
 
@@ -76,9 +79,9 @@ public final class FellingLogBlockEntity extends BlockEntity {
         return phases;
     }
 
-    /** The corner of its 2x2 group this cell is, or null for a log that stands alone. */
-    public Stageable.@Nullable Corner corner() {
-        return corner;
+    /** Where this cell sits in its trunk of several logs, or null for a log that stands alone. */
+    public Stageable.@Nullable Cell cell() {
+        return cell;
     }
 
     /**
@@ -212,10 +215,18 @@ public final class FellingLogBlockEntity extends BlockEntity {
         this.phases = input.getIntOr(PHASES, 1);
         this.original = input.read(ORIGINAL, BlockState.CODEC).orElse(null);
         this.stripped = input.read(STRIPPED, BlockState.CODEC).orElse(null);
-        this.corner = input.getString(CORNER).map(Stageable.Corner::named).orElse(null);
-        if (corner == null && family == Family.GROUP && original != null) {
+        int col = input.getIntOr(COL, -1);
+        Stageable.Corner corner = input.getString(CORNER).map(Stageable.Corner::named).orElse(null);
+        if (col >= 0) {
+            this.cell = new Stageable.Cell(col, input.getIntOr(ROW, 0));
+        } else if (corner != null) {
+            this.cell = corner.cell();
+        } else if (family == Family.GROUP && original != null
+                && Stageable.barkSide(original) != null) {
             // Saved before the corner was: a quarter log's bark side says it.
-            this.corner = Stageable.barkSide(original);
+            this.cell = Stageable.barkSide(original).cell();
+        } else {
+            this.cell = null;
         }
         this.logsAbove = input.getIntOr(LOGS_ABOVE, 0);
         this.lastHit = input.getLongOr(LAST_HIT, 0L);
@@ -232,8 +243,9 @@ public final class FellingLogBlockEntity extends BlockEntity {
         output.putInt(PHASES, phases);
         output.storeNullable(ORIGINAL, BlockState.CODEC, original);
         output.storeNullable(STRIPPED, BlockState.CODEC, stripped);
-        if (corner != null) {
-            output.putString(CORNER, corner.name());
+        if (cell != null) {
+            output.putInt(COL, cell.col());
+            output.putInt(ROW, cell.row());
         }
         output.putInt(LOGS_ABOVE, logsAbove);
         output.putLong(LAST_HIT, lastHit);

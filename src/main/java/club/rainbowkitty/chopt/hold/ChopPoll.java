@@ -36,7 +36,6 @@ import club.rainbowkitty.chopt.chop.Durability;
 import club.rainbowkitty.chopt.chop.Feller;
 import club.rainbowkitty.chopt.display.Feedback;
 import club.rainbowkitty.chopt.mixin.ServerPlayerGameModeAccessor;
-import club.rainbowkitty.chopt.tree.Family;
 import club.rainbowkitty.chopt.tree.Stageable;
 import club.rainbowkitty.chopt.tree.TimeCurve;
 
@@ -269,14 +268,14 @@ public final class ChopPoll {
                 || own.original() == null) {
             return null;
         }
-        if (own.family() != Family.GROUP) {
+        if (!own.family().isGroup()) {
             return new Chopped(cell, own);
         }
-        Stageable.Corner corner = own.corner();
-        if (corner == null) {
+        Stageable.Cell place = own.cell();
+        if (place == null) {
             return null;
         }
-        BlockPos northwest = Stageable.groupCells(cell, corner).get(0);
+        BlockPos northwest = Stageable.groupCells(cell, own.family().size(), place).get(0);
         return level.getBlockEntity(northwest) instanceof FellingLogBlockEntity master
                 ? new Chopped(northwest, master) : null;
     }

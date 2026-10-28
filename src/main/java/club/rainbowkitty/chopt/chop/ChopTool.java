@@ -9,7 +9,6 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.GameType;
 
 import club.rainbowkitty.chopt.block.FellingLogBlockEntity;
-import club.rainbowkitty.chopt.tree.Family;
 
 /**
  * Who chops, and what a chop costs. A player in survival chops with whatever they hold, a fist
@@ -55,6 +54,6 @@ public final class ChopTool {
         }
         return !player.isShiftKeyDown()
                 || level.getBlockEntity(pos) instanceof FellingLogBlockEntity log
-                        && log.family() == Family.GROUP;
+                        && log.family().isGroup();
     }
 }

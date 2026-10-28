@@ -58,7 +58,7 @@ public final class Conversion {
         if (!region.stageable() || region.n() < 1 || !Canopy.passes(level, region)) {
             return true;
         }
-        if (family == Family.GROUP && !siblingsAgree(level, breaker, region, pos)) {
+        if (family.isGroup() && !siblingsAgree(level, breaker, region, pos)) {
             return true;
         }
         // Read while the log is still there: the strip rules look at the block at the position.
@@ -66,7 +66,7 @@ public final class Conversion {
         double base = state.getDestroyProgress(breaker, level, pos);
         double m = TimeCurve.m(level.getServer(), region.n());
         int phases = TimeCurve.effectivePhases(family, m, base);
-        if (family == Family.GROUP) {
+        if (family.isGroup()) {
             FellingLogBlock.stageGroup(level, region.cluster(), phases, region.n());
         } else {
             FellingLogBlock.stage(level, pos, state, family, null, phases, region.n());
@@ -75,8 +75,9 @@ public final class Conversion {
         return false;
     }
 
-    // Asks the break event for the three cells the cut does not break itself, inside a cascade so
-    // that it does not convert them: a claim that covers any of them forbids the cut as a whole.
+    // Asks the break event for the other cells of the group the cut does not break itself, inside
+    // a cascade so that it does not convert them: a claim that covers any of them forbids the cut
+    // as a whole.
     private static boolean siblingsAgree(ServerLevel level, ServerPlayer breaker, Region region,
             BlockPos cut) {
         boolean[] agreed = {true};

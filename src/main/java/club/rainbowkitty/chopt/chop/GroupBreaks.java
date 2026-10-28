@@ -15,7 +15,6 @@ import net.minecraft.world.level.block.state.BlockState;
 import club.rainbowkitty.chopt.Chopt;
 import club.rainbowkitty.chopt.block.FellingLogBlock;
 import club.rainbowkitty.chopt.block.FellingLogBlockEntity;
-import club.rainbowkitty.chopt.tree.Family;
 
 /**
  * A 2x2 group that has been started is not broken up by hand. A player in survival chops it even
@@ -41,7 +40,7 @@ public final class GroupBreaks {
         boolean refused = world instanceof ServerLevel && player instanceof ServerPlayer breaker
                 && BreakScope.current() == breaker && !Cascade.active()
                 && state.getBlock() instanceof FellingLogBlock
-                && blockEntity instanceof FellingLogBlockEntity log && log.family() == Family.GROUP
+                && blockEntity instanceof FellingLogBlockEntity log && log.family().isGroup()
                 && !breaker.gameMode.isCreative();
         return !refused;
     }

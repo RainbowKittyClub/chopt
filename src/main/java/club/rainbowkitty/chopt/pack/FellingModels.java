@@ -43,8 +43,9 @@ import club.rainbowkitty.chopt.tree.Stageable;
  * middle of the texture, as a log cut thinner would. The models are found by following each log
  * block's own blockstate and model through the pack being built, so any mod's log whose model is
  * the usual cube, quarter log or small log is covered without being named. A plain log is covered
- * twice, standing alone and as one of the four of a 2x2 trunk. A species whose model is anything
- * else is left out and drawn as a block display for everyone.
+ * three times, standing alone, as one of the four of a 2x2 trunk and as one of the nine of a 3x3
+ * trunk. A species whose model is anything else is left out and drawn as a block display for
+ * everyone.
  */
 public final class FellingModels {
     private static final Identifier AFTER_DEFAULT = Chopt.id("felling_models");
@@ -57,10 +58,13 @@ public final class FellingModels {
             List.of("up", "down", "north", "south", "east", "west");
     private static final String MODELS = "assets/chopt/models/block/felling/";
     // The start of the names of the shared parents, which the width in pixels ends: a column, a
-    // trunk of Terraform's quarter logs and a trunk of plain logs.
+    // trunk of Terraform's quarter logs, a 2x2 trunk of plain logs and a 3x3 one.
     private static final String COLUMNS = "chopt:block/felling/w";
     private static final String QUARTERS = "chopt:block/felling/quarter/w";
     private static final String SQUARES = "chopt:block/felling/square/w";
+    private static final String NINES = "chopt:block/felling/square3/w";
+    // The silhouette of a 3x3 trunk as one box, which the cracks over it copy.
+    private static final String NINES_SHAPE = "chopt:block/felling/square3/shape/w";
 
     // The species that have models, by block id, in registry order, each with the families it is
     // drawn as and the start of its parents' names; replaced whole by each build.
@@ -97,14 +101,18 @@ public final class FellingModels {
     }
 
     /**
-     * The parent model of the cropped model that {@code block} has as {@code family} when
-     * {@code width} pixels across, or null when it has none. The parent holds the shape, which a
-     * crack over the log copies.
+     * The model whose shape a crack over the cropped model that {@code block} has as
+     * {@code family} when {@code width} pixels across copies, or null when it has none. It is the
+     * parent of the cropped model, except for a 3x3 trunk: that is nine boxes, one for each log,
+     * and a crack copied from each would repeat nine times, so its shape is one box.
      */
-    public static @Nullable Identifier parent(Identifier block, Family family, int width) {
+    public static @Nullable Identifier crackShape(Identifier block, Family family, int width) {
         Map<Family, String> families = defined.get(block);
-        return families == null || !families.containsKey(family) ? null
-                : Identifier.parse(families.get(family) + width);
+        if (families == null || !families.containsKey(family)) {
+            return null;
+        }
+        return Identifier.parse((family == Family.GROUP3 ? NINES_SHAPE : families.get(family))
+                + width);
     }
 
     /**
@@ -120,11 +128,15 @@ public final class FellingModels {
         return stack;
     }
 
-    // The path a species' models and item definition go under: a trunk of four logs apart from
-    // the single log of the same block.
+    // The path a species' models and item definition go under: a trunk of four or nine logs apart
+    // from the single log of the same block.
     private static String key(Identifier block, Family family) {
-        return (family == Family.GROUP ? "group/" : "") + block.getNamespace() + "/"
-                + block.getPath();
+        String trunk = switch (family) {
+            case GROUP -> "group/";
+            case GROUP3 -> "group3/";
+            default -> "";
+        };
+        return trunk + block.getNamespace() + "/" + block.getPath();
     }
 
     private static void build(ResourcePackBuilder builder) {
@@ -144,8 +156,8 @@ public final class FellingModels {
         }
     }
 
-    // The shared parents: a square column of each even width, and a trunk of each of both kinds.
-    // The cracks over a log copy the shape of its parent, so each is asked for as it is written.
+    // The shared parents: a square column of each even width, and a trunk of each kind. The cracks
+    // over a log copy the shape of its parent, so each is asked for as it is written.
     private void writeParents() {
         for (int width = 2; width <= 14; width += 2) {
             write(MODELS + "w" + width + ".json", pillarParent(width));
@@ -156,6 +168,11 @@ public final class FellingModels {
             write(MODELS + "square/w" + width + ".json", squareParent(width / 2));
             Cracks.request(Identifier.parse(QUARTERS + width));
             Cracks.request(Identifier.parse(SQUARES + width));
+        }
+        for (int width = 2; width <= 46; width += 2) {
+            write(MODELS + "square3/w" + width + ".json", ninesParent(width / 2));
+            write(MODELS + "square3/shape/w" + width + ".json", ninesShape(width / 2));
+            Cracks.request(Identifier.parse(NINES_SHAPE + width));
         }
     }
 
@@ -176,6 +193,7 @@ public final class FellingModels {
                 Textures textures = pillarTextures(id);
                 add(id, Family.PILLAR, COLUMNS, textures);
                 add(id, Family.GROUP, SQUARES, textures);
+                add(id, Family.GROUP3, NINES, textures);
             }
         } catch (RuntimeException | IOException e) {
             skipped.add(id + " (" + e.getClass().getSimpleName() + ")");
@@ -554,6 +572,65 @@ public final class FellingModels {
                 + plainBox(8, 8 - h, 0, lo, h, 16, "north", "east") + ","
                 + plainBox(8, 8, 0, 0, h, h, "south", "east") + ","
                 + plainBox(8 - h, 8, lo, 0, 16, h, "south", "west") + "]}";
+    }
+
+    // A trunk of nine plain logs whose half width is {@code h}: the part of each log's block that
+    // lies within {@code h} of the middle of the centre block. A box shows the window of its own
+    // block's texture that vanilla would give it, and a side face only where no other box of the
+    // trunk stands against it.
+    private static String ninesParent(int h) {
+        List<String> boxes = new ArrayList<>();
+        for (int row = 0; row < 3; row++) {
+            for (int col = 0; col < 3; col++) {
+                int[] x = reach(col, h);
+                int[] z = reach(row, h);
+                if (x == null || z == null) {
+                    continue;
+                }
+                List<String> bare = new ArrayList<>();
+                if (reach(row - 1, h) == null) {
+                    bare.add("north");
+                }
+                if (reach(row + 1, h) == null) {
+                    bare.add("south");
+                }
+                if (reach(col - 1, h) == null) {
+                    bare.add("west");
+                }
+                if (reach(col + 1, h) == null) {
+                    bare.add("east");
+                }
+                boxes.add(plainBox(x[0], z[0], x[0] - x[2], z[0] - z[2], x[1] - x[2], z[1] - z[2],
+                        bare.toArray(String[]::new)));
+            }
+        }
+        return "{\"textures\":{\"particle\":\"#side\"},\"elements\":["
+                + String.join(",", boxes) + "]}";
+    }
+
+    // The silhouette of the same trunk as one box, for the cracks. The crack generator wraps a
+    // face's uv onto the texture by position, so the nine boxes would each get a whole crack; a
+    // face wider than a block is clamped to the whole texture instead, one crack over the trunk.
+    private static String ninesShape(int h) {
+        int lo = 8 - h;
+        int hi = 8 + h;
+        return "{\"elements\":[{\"from\":[" + lo + ",0," + lo + "],\"to\":[" + hi + ",16," + hi
+                + "],\"faces\":{" + String.join(",", SIDES.stream()
+                        .map(side -> "\"" + side + "\":{\"texture\":\"#side\"}").toList())
+                + "}}]}";
+    }
+
+    // The part of block {@code index} of three, counted from the northwest, that lies within
+    // {@code h} of the middle of the centre block, as its model-space start, its end and the
+    // model-space start of the block; null where the block lies out of the trunk or past its edge.
+    private static int @Nullable [] reach(int index, int h) {
+        if (index < 0 || index > 2) {
+            return null;
+        }
+        int start = 16 * index - 16;
+        int from = Math.max(start, 8 - h);
+        int to = Math.min(start + 16, 8 + h);
+        return to > from ? new int[] {from, to, start} : null;
     }
 
     // The box at ({@code mx}, {@code mz}) in the model that stands at x0..x1 and z0..z1 of its own

@@ -26,7 +26,7 @@ import club.rainbowkitty.chopt.ledger.Provenance;
  * cheapest path of each log to the ground.
  *
  * @param family the shape of the cut log
- * @param cluster the logs the cut breaks itself: the log, or a 2x2 group's four cells
+ * @param cluster the logs the cut breaks itself: the log, or a 2x2 or 3x3 group's cells
  * @param members every log felled, the cluster included, in (y, x, z) order
  */
 public record Region(Family family, List<BlockPos> cluster, List<BlockPos> members) {
@@ -63,7 +63,7 @@ public record Region(Family family, List<BlockPos> cluster, List<BlockPos> membe
         if (!Provenance.isNatural(level, origin)) {
             return none(family);
         }
-        if (family == Family.GROUP) {
+        if (family.isGroup()) {
             Stageable.Group group = Stageable.group(level, origin, state);
             return group == null ? none(family) : hangFrom(level, group.cells(), family);
         }
@@ -79,9 +79,9 @@ public record Region(Family family, List<BlockPos> cluster, List<BlockPos> membe
         if (!Provenance.isNatural(level, master)) {
             return none(family);
         }
-        if (family == Family.GROUP) {
-            return hangFrom(level, Stageable.groupCells(master, Stageable.Corner.NORTHWEST),
-                    family);
+        if (family.isGroup()) {
+            return hangFrom(level, Stageable.groupCells(master, family.size(),
+                    new Stageable.Cell(0, 0)), family);
         }
         return hangFrom(level, List.of(master), family);
     }

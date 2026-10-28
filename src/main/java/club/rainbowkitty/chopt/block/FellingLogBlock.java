@@ -59,7 +59,8 @@ import club.rainbowkitty.chopt.tree.Strip;
 public class FellingLogBlock extends BarrierBlock
         implements PolymerBlock, EntityBlock, BlockWithElementHolder {
     /** The current phase, from 1; the northwest cell of a group holds the group's. */
-    public static final IntegerProperty PHASE = IntegerProperty.create("phase", 1, 15);
+    public static final IntegerProperty PHASE =
+            IntegerProperty.create("phase", 1, Family.mostPhases());
     /** The axis the display runs along, which the log's own axis is for a plain log. */
     public static final EnumProperty<Direction.Axis> AXIS = BlockStateProperties.AXIS;
 
@@ -79,7 +80,7 @@ public class FellingLogBlock extends BarrierBlock
 
     /** The data a new felling log is built with, handed to its block entity while it is built. */
     public record Pending(BlockPos pos, BlockState original, BlockState stripped, Family family,
-            Stageable.@Nullable Corner corner, int phases, int logsAbove) {}
+            Stageable.@Nullable Cell cell, int phases, int logsAbove) {}
 
     public FellingLogBlock(Properties properties) {
         super(properties);
@@ -148,17 +149,17 @@ public class FellingLogBlock extends BarrierBlock
 
     /**
      * Turns the log at {@code pos} into a felling log in phase 1. The stripped look is worked out
-     * first, while the log is still there to be read. {@code corner} is where the log sits in its
-     * 2x2 group, null for one that stands alone.
+     * first, while the log is still there to be read. {@code cell} is where the log sits in its
+     * trunk of several logs, null for one that stands alone.
      */
     public static void stage(Level level, BlockPos pos, BlockState original, Family family,
-            Stageable.@Nullable Corner corner, int phases, int logsAbove) {
+            Stageable.@Nullable Cell cell, int phases, int logsAbove) {
         BlockState stripped = Strip.of(level, pos, original);
         BlockState felling = ChoptBlocks.FELLING_LOG.defaultBlockState()
                 .setValue(AXIS, displayAxis(original, family))
                 .setValue(WATERLOGGED, original.hasProperty(WATERLOGGED)
                         && original.getValue(WATERLOGGED));
-        PENDING.set(new Pending(pos, original, stripped, family, corner, phases, logsAbove));
+        PENDING.set(new Pending(pos, original, stripped, family, cell, phases, logsAbove));
         try {
             level.setBlock(pos, felling, Block.UPDATE_ALL);
         } finally {
@@ -171,11 +172,13 @@ public class FellingLogBlock extends BarrierBlock
     }
 
     /**
-     * Turns the four cells of a 2x2 group, northwest first and then clockwise, into felling logs,
-     * the northwest cell first so that the others find their master when they check themselves. A
-     * failure puts back every cell already turned.
+     * Turns the cells of a trunk of several logs, row by row from the northwest (four for a 2x2
+     * trunk, nine for a 3x3), into felling logs, the northwest cell first so that the others find
+     * their master when they check themselves. A failure puts back every cell already turned.
      */
     public static void stageGroup(Level level, List<BlockPos> cells, int phases, int logsAbove) {
+        int size = cells.size() == 9 ? 3 : 2;
+        Family family = size == 3 ? Family.GROUP3 : Family.GROUP;
         List<BlockState> originals = new ArrayList<>();
         for (BlockPos cell : cells) {
             originals.add(level.getBlockState(cell));
@@ -183,8 +186,8 @@ public class FellingLogBlock extends BarrierBlock
         int done = 0;
         try {
             for (; done < cells.size(); done++) {
-                stage(level, cells.get(done), originals.get(done), Family.GROUP,
-                        Stageable.Corner.values()[done], phases, logsAbove);
+                stage(level, cells.get(done), originals.get(done), family,
+                        Stageable.Cell.of(done, size), phases, logsAbove);
             }
         } catch (RuntimeException e) {
             for (int i = 0; i < done; i++) {
@@ -197,7 +200,7 @@ public class FellingLogBlock extends BarrierBlock
     // The axis a log's display runs along: its own for a plain log, the main axis of a small log
     // (up and down, else east and west, else north-south), and always upright for a group.
     private static Direction.Axis displayAxis(BlockState original, Family family) {
-        if (family == Family.GROUP) {
+        if (family.isGroup()) {
             return Direction.Axis.Y;
         }
         if (Stageable.isSmall(original)) {
@@ -239,8 +242,8 @@ public class FellingLogBlock extends BarrierBlock
     public @Nullable ElementHolder createElementHolder(ServerLevel level, BlockPos pos,
             BlockState initialState) {
         Pending pending = pendingAt(pos);
-        boolean follower = pending != null && pending.family() == Family.GROUP
-                && pending.corner() != Stageable.Corner.NORTHWEST;
+        boolean follower = pending != null && pending.family().isGroup()
+                && !pending.cell().master();
         return follower ? null : new FellingHolder(pending);
     }
 
@@ -273,9 +276,9 @@ public class FellingLogBlock extends BarrierBlock
         }
         BlockPos master = pos;
         FellingLogBlockEntity owner = entity;
-        Stageable.Corner corner = entity.family() == Family.GROUP ? entity.corner() : null;
-        if (corner != null) {
-            master = Stageable.groupCells(pos, corner).get(0);
+        Stageable.Cell cell = entity.family().isGroup() ? entity.cell() : null;
+        if (cell != null) {
+            master = Stageable.groupCells(pos, entity.family().size(), cell).get(0);
             if (level.getBlockEntity(master) instanceof FellingLogBlockEntity found) {
                 owner = found;
             }
@@ -294,13 +297,14 @@ public class FellingLogBlock extends BarrierBlock
         }
     }
 
-    // When a felling log goes, the cells beside it check themselves at the end of the tick.
+    // When a felling log goes, the cells near it, as far as the other end of a 3x3 trunk, check
+    // themselves at the end of the tick.
     @Override
     protected void affectNeighborsAfterRemoval(BlockState state, ServerLevel level, BlockPos pos,
             boolean movedByPiston) {
         super.affectNeighborsAfterRemoval(state, level, pos, movedByPiston);
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
                 BlockPos near = pos.offset(dx, 0, dz);
                 if ((dx != 0 || dz != 0) && level.getBlockState(near).getBlock() == this) {
                     RECHECK.add(new Awaiting(level, near, 0));
@@ -318,7 +322,7 @@ public class FellingLogBlock extends BarrierBlock
                 || entity.original() == null || entity.family() == null) {
             BlockState oak = Blocks.OAK_LOG.defaultBlockState();
             revert(level, pos, oak.setValue(AXIS, state.getValue(AXIS)));
-        } else if (entity.family() == Family.GROUP && !groupIntact(level, pos, entity)) {
+        } else if (entity.family().isGroup() && !groupIntact(level, pos, entity)) {
             revert(level, pos, entity.original());
         }
     }
@@ -345,25 +349,25 @@ public class FellingLogBlock extends BarrierBlock
         level.setBlock(pos, plain, Block.UPDATE_ALL);
     }
 
-    // Whether all four cells of the group this cell belongs to are felling logs of that group. A
+    // Whether all the cells of the group this cell belongs to are felling logs of that group. A
     // cell in an unloaded chunk cannot be judged, so it does not count against it.
     private static boolean groupIntact(ServerLevel level, BlockPos pos,
             FellingLogBlockEntity entity) {
-        Stageable.Corner corner = entity.corner();
-        if (corner == null) {
+        Stageable.Cell cell = entity.cell();
+        if (cell == null) {
             return false;
         }
-        List<BlockPos> cells = Stageable.groupCells(pos, corner);
-        Stageable.Corner[] corners = Stageable.Corner.values();
-        for (int i = 0; i < 4; i++) {
-            BlockPos cell = cells.get(i);
-            if (!level.hasChunkAt(cell)) {
+        int size = entity.family().size();
+        List<BlockPos> cells = Stageable.groupCells(pos, size, cell);
+        for (int i = 0; i < cells.size(); i++) {
+            BlockPos at = cells.get(i);
+            if (!level.hasChunkAt(at)) {
                 continue;
             }
-            if (!(level.getBlockState(cell).getBlock() instanceof FellingLogBlock)
-                    || !(level.getBlockEntity(cell) instanceof FellingLogBlockEntity other)
-                    || other.family() != Family.GROUP || other.original() == null
-                    || other.corner() != corners[i]) {
+            if (!(level.getBlockState(at).getBlock() instanceof FellingLogBlock)
+                    || !(level.getBlockEntity(at) instanceof FellingLogBlockEntity other)
+                    || other.family() != entity.family() || other.original() == null
+                    || !Stageable.Cell.of(i, size).equals(other.cell())) {
                 return false;
             }
         }
