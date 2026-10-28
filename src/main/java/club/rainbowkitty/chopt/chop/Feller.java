@@ -1,21 +1,29 @@
 package club.rainbowkitty.chopt.chop;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.stats.Stats;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
+import club.rainbowkitty.chopt.Chopt;
 import club.rainbowkitty.chopt.block.FellingLogBlock;
 import club.rainbowkitty.chopt.block.FellingLogBlockEntity;
 import club.rainbowkitty.chopt.display.Feedback;
@@ -28,8 +36,14 @@ import club.rainbowkitty.chopt.tree.Stageable;
  * the break event first, so a claim can refuse it, and a log whose tool could not pay for it stays.
  */
 public final class Feller {
+    /** Blocks that hang from a log and go when it falls, such as a snag's branches. */
+    public static final TagKey<Block> FALLS_WITH_LOGS =
+            TagKey.create(Registries.BLOCK, Chopt.id("falls_with_logs"));
+
     // What vanilla charges in hunger for each block a player breaks.
     private static final float EXHAUSTION = 0.005F;
+    // The most attached blocks one fallen log takes with it.
+    private static final int ATTACHED_CAP = 64;
 
     private Feller() {}
 
@@ -112,7 +126,45 @@ public final class Feller {
         PlayerBlockBreakEvents.AFTER.invoker().afterBlockBreak(level, breaker, pos, state, entity);
         breaker.awardStat(Stats.BLOCK_MINED.get(mined));
         breaker.causeFoodExhaustion(EXHAUSTION);
+        takeAttached(level, breaker, tool, pos);
         return true;
+    }
+
+    // Breaks the blocks of the tag that touch the fallen log at pos, and those that touch them in
+    // turn, up to the cap. Each asks the break event, so a claim can refuse it, and none is paid
+    // for by the tool: they are part of the log, as a leafy small log's leaves are.
+    private static void takeAttached(ServerLevel level, ServerPlayer breaker, ItemStack tool,
+            BlockPos pos) {
+        Deque<BlockPos> queue = new ArrayDeque<>();
+        Set<BlockPos> seen = new HashSet<>();
+        queue.add(pos);
+        seen.add(pos);
+        int taken = 0;
+        while (!queue.isEmpty() && taken < ATTACHED_CAP) {
+            BlockPos at = queue.poll();
+            for (Direction side : Direction.values()) {
+                BlockPos next = at.relative(side);
+                if (!seen.add(next) || !level.hasChunkAt(next)) {
+                    continue;
+                }
+                BlockState state = level.getBlockState(next);
+                if (!state.is(FALLS_WITH_LOGS)) {
+                    continue;
+                }
+                BlockEntity entity = level.getBlockEntity(next);
+                if (!PlayerBlockBreakEvents.BEFORE.invoker().beforeBlockBreak(level, breaker, next,
+                        state, entity)) {
+                    continue;
+                }
+                Block.dropResources(state, level, next, entity, breaker, tool);
+                level.setBlock(next, state.getFluidState().createLegacyBlock(),
+                        Block.UPDATE_ALL);
+                PlayerBlockBreakEvents.AFTER.invoker().afterBlockBreak(level, breaker, next, state,
+                        entity);
+                queue.add(next);
+                taken++;
+            }
+        }
     }
 
     // A leafy small log gives up its leaves first, as breaking just the leaves would, so the

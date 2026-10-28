@@ -1,0 +1,16 @@
+{
+  "values": [
+    {
+      "id": "cinderscapes:scorched_stem",
+      "required": false
+    },
+    {
+      "id": "cinderscapes:scorched_hyphae",
+      "required": false
+    },
+    {
+      "id": "woods_and_mires:pine_snag_log",
+      "required": false
+    }
+  ]
+}

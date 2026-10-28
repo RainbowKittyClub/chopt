@@ -179,8 +179,10 @@ public final class FellingModels {
     // One block: its model decides whether it is a log this can draw, and as which family.
     private void consider(Identifier id, Block block) {
         String path = id.getPath();
-        // A felling log is drawn from the stripped look of a log, so only those need models.
-        if (id.getNamespace().equals(Chopt.MOD_ID) || !path.contains("stripped")
+        // A felling log is drawn from the stripped look of a log, so only those need models, and
+        // the crownless logs, which an axe does not strip and which are their own look.
+        boolean crownless = block.defaultBlockState().is(Stageable.CROWNLESS);
+        if (id.getNamespace().equals(Chopt.MOD_ID) || !(path.contains("stripped") || crownless)
                 || LOG_WORDS.stream().noneMatch(path::contains)) {
             return;
         }

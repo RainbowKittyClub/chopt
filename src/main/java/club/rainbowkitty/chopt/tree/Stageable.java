@@ -34,6 +34,13 @@ public final class Stageable {
     public static final TagKey<Block> NEVER_STAGED =
             TagKey.create(Registries.BLOCK, Chopt.id("never_staged"));
 
+    /**
+     * Logs of trees that have no crown, such as a dead tree or a snag. A region with one at its cut
+     * passes the canopy gate without leaves, and one that an axe cannot strip may still be cut.
+     */
+    public static final TagKey<Block> CROWNLESS =
+            TagKey.create(Registries.BLOCK, Chopt.id("crownless"));
+
     private static final List<String> SMALL_PROPERTIES = List.of(
             "axis", "up", "down", "north", "east", "south", "west", "waterlogged");
 
@@ -94,7 +101,7 @@ public final class Stageable {
 
     /**
      * The family of the log {@code state} at {@code pos}, or null when it is not staged: not a
-     * log, kept out by the tag, already stripped, a leafy small log,
+     * log, kept out by the tag, already stripped (unless it is a crownless log), a leafy small log,
      * or a quarter log whose 2x2 group is not whole. An upright plain log that stands in a whole
      * 2x2 or 3x3 group is part of it. Reads neighbouring chunks only where they are loaded.
      */
@@ -106,7 +113,7 @@ public final class Stageable {
             Group quarter = group(level, pos, state);
             return quarter != null ? quarter.family() : null;
         }
-        if (!Strip.strips(level, pos, state)) {
+        if (!Strip.strips(level, pos, state) && !state.is(CROWNLESS)) {
             return null;
         }
         if (isSmall(state)) {
@@ -278,7 +285,8 @@ public final class Stageable {
                 return null;
             }
             Block target = Strip.of(level, at, cellState).getBlock();
-            if (target == cellState.getBlock() || stripped != null && target != stripped) {
+            if (target == cellState.getBlock() && !cellState.is(CROWNLESS)
+                    || stripped != null && target != stripped) {
                 return null;
             }
             stripped = target;

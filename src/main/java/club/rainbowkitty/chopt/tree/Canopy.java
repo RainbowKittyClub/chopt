@@ -29,9 +29,14 @@ public final class Canopy {
 
     /**
      * Whether some block within 2 of a region log is canopy. Leaves a player placed do not count,
-     * and a natural leafy small log does. Reads loaded chunks only.
+     * and a natural leafy small log does. A region cut at a crownless log (a dead tree, a snag)
+     * needs none. Reads loaded chunks only.
      */
     public static boolean passes(ServerLevel level, Region region) {
+        if (!region.cluster().isEmpty()
+                && level.getBlockState(region.cluster().get(0)).is(Stageable.CROWNLESS)) {
+            return true;
+        }
         Set<BlockPos> seen = new HashSet<>();
         for (BlockPos log : region.members()) {
             for (int dx = -RADIUS; dx <= RADIUS; dx++) {
