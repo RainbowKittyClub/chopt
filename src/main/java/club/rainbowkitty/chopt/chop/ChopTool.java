@@ -1,9 +1,14 @@
 package club.rainbowkitty.chopt.chop;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.Tool;
+import net.minecraft.world.level.BlockGetter;
+
+import club.rainbowkitty.chopt.block.FellingLogBlockEntity;
+import club.rainbowkitty.chopt.tree.Family;
 
 /**
  * Which tools chop. Any tool vanilla charges durability to for breaking a block does: an axe,
@@ -30,5 +35,19 @@ public final class ChopTool {
     public static boolean chops(ServerPlayer player) {
         return player.gameMode.isSurvival() && !player.isShiftKeyDown()
                 && isChopTool(player.getMainHandItem());
+    }
+
+    /**
+     * Whether {@code player} chops the felling log at {@code pos}. Sneaking only matters for a log
+     * that stands alone, which a sneaking player breaks as the plain log it was; a started 2x2
+     * group is not broken up by hand, so it is chopped whether the player sneaks or not.
+     */
+    public static boolean chopsAt(ServerPlayer player, BlockGetter level, BlockPos pos) {
+        if (!player.gameMode.isSurvival() || !isChopTool(player.getMainHandItem())) {
+            return false;
+        }
+        return !player.isShiftKeyDown()
+                || level.getBlockEntity(pos) instanceof FellingLogBlockEntity log
+                        && log.family() == Family.GROUP;
     }
 }

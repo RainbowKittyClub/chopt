@@ -89,11 +89,15 @@ public final class ChopPoll {
 
     private static void visit(MinecraftServer server, ServerPlayer player, long now) {
         ServerLevel level = player.level();
-        boolean chops = player.isAlive() && ChopTool.chops(player);
-        if (chops) {
+        boolean tool = player.isAlive() && player.gameMode.isSurvival()
+                && ChopTool.isChopTool(player.getMainHandItem());
+        if (tool) {
             clearVanillaMining(player, level);
         }
-        BlockPos target = chops && swinging(player) ? aimedFelling(level, player) : null;
+        BlockPos target = tool && swinging(player) ? aimedFelling(level, player) : null;
+        if (target != null && !ChopTool.chopsAt(player, level, target)) {
+            target = null;
+        }
         Chopped chopped = target == null ? null : masterOf(level, target);
         if (chopped == null) {
             return;
@@ -160,12 +164,19 @@ public final class ChopPoll {
     // vanilla break the log by itself.
     private static void clearVanillaMining(ServerPlayer player, ServerLevel level) {
         ServerPlayerGameModeAccessor mode = (ServerPlayerGameModeAccessor) player.gameMode;
-        if (mode.chopt$hasDelayedDestroy() && isFelling(level, mode.chopt$delayedDestroyPos())) {
+        if (mode.chopt$hasDelayedDestroy()
+                && chopsAtFelling(player, level, mode.chopt$delayedDestroyPos())) {
             mode.chopt$setHasDelayedDestroy(false);
         }
-        if (mode.chopt$isDestroyingBlock() && isFelling(level, mode.chopt$destroyPos())) {
+        if (mode.chopt$isDestroyingBlock()
+                && chopsAtFelling(player, level, mode.chopt$destroyPos())) {
             mode.chopt$setDestroyingBlock(false);
         }
+    }
+
+    // Whether the cell is a felling log that this player chops, not breaks.
+    private static boolean chopsAtFelling(ServerPlayer player, ServerLevel level, BlockPos pos) {
+        return isFelling(level, pos) && ChopTool.chopsAt(player, level, pos);
     }
 
     private static boolean isFelling(ServerLevel level, BlockPos pos) {

@@ -9,6 +9,7 @@ import eu.pb4.polymer.core.api.block.PolymerBlock;
 import eu.pb4.polymer.virtualentity.api.BlockWithElementHolder;
 import eu.pb4.polymer.virtualentity.api.ElementHolder;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerBlockEntityEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.context.PacketContext;
 import org.jspecify.annotations.Nullable;
@@ -51,7 +52,9 @@ import club.rainbowkitty.chopt.tree.Strip;
  * A log being felled. To every client it is a barrier, so its outline and collision never change
  * as the phases go by; the shrinking log is a display inside it (S7). The block entity holds the
  * log it was. A vanilla break of this block gives that log back, so a sneaking player, a bare
- * hand, a tool that cannot chop or another mod breaks it as the plain log it was.
+ * hand, a tool that cannot chop or another mod breaks it as the plain log it was. A cell of a 2x2
+ * group is the exception for a player in survival: a chop tool chops it even while sneaking, and
+ * a bare hand cannot break it ({@code GroupBreaks}).
  */
 public class FellingLogBlock extends BarrierBlock
         implements PolymerBlock, EntityBlock, BlockWithElementHolder {
@@ -64,6 +67,8 @@ public class FellingLogBlock extends BarrierBlock
     private static final BlockState BARRIER_WET = BARRIER.setValue(WATERLOGGED, true);
     private static final ThreadLocal<Pending> PENDING = new ThreadLocal<>();
     private static final Queue<Awaiting> AWAITING_LOAD = new ConcurrentLinkedQueue<>();
+    // Felling logs beside one that was just removed, to check before the tick ends.
+    private static final Queue<Awaiting> RECHECK = new ConcurrentLinkedQueue<>();
     // How many ticks a loaded log waits for its chunk to tick before it is left to its idle check.
     private static final int MAX_LOAD_WAIT = 600;
     // Ticks between checks of a felling log that is not yet idle long enough to revert.
@@ -93,7 +98,31 @@ public class FellingLogBlock extends BarrierBlock
                 AWAITING_LOAD.add(new Awaiting(level, entity.getBlockPos(), 0));
             }
         });
-        ServerTickEvents.END_SERVER_TICK.register(server -> admitLoaded());
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            admitLoaded();
+            recheckNeighbours();
+        });
+        // Nothing queued outlives its server, whose levels the entries hold.
+        ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+            AWAITING_LOAD.clear();
+            RECHECK.clear();
+        });
+    }
+
+    // Checks the cells that stood beside a removed one, now that whatever removed it is done: the
+    // rest of a group it broke up goes back to plain logs by the end of that tick, or of the next
+    // for a removal made by the tick itself. A scheduled tick would not do, since a pending one of
+    // the cell's own, the idle check, swallows a new one.
+    private static void recheckNeighbours() {
+        for (int waiting = RECHECK.size(); waiting > 0; waiting--) {
+            Awaiting next = RECHECK.poll();
+            if (next != null && next.level().hasChunkAt(next.pos())) {
+                BlockState there = next.level().getBlockState(next.pos());
+                if (there.getBlock() == ChoptBlocks.FELLING_LOG) {
+                    validate(next.level(), next.pos(), there);
+                }
+            }
+        }
     }
 
     // Schedules the check of every queued log whose chunk now ticks, and asks again next tick of
@@ -265,7 +294,7 @@ public class FellingLogBlock extends BarrierBlock
         }
     }
 
-    // When a felling log goes, the cells of its group that stay check themselves at once.
+    // When a felling log goes, the cells beside it check themselves at the end of the tick.
     @Override
     protected void affectNeighborsAfterRemoval(BlockState state, ServerLevel level, BlockPos pos,
             boolean movedByPiston) {
@@ -274,7 +303,7 @@ public class FellingLogBlock extends BarrierBlock
             for (int dz = -1; dz <= 1; dz++) {
                 BlockPos near = pos.offset(dx, 0, dz);
                 if ((dx != 0 || dz != 0) && level.getBlockState(near).getBlock() == this) {
-                    level.scheduleTick(near, this, 1);
+                    RECHECK.add(new Awaiting(level, near, 0));
                 }
             }
         }
@@ -354,7 +383,7 @@ public class FellingLogBlock extends BarrierBlock
     @Override
     public boolean handleMiningOnServer(ItemStack tool, BlockState state, BlockPos pos,
             ServerPlayer player) {
-        return !ChopTool.chops(player);
+        return !ChopTool.chopsAt(player, player.level(), pos);
     }
 
     /** Light gets through, as it does a barrier; no override on 26.2's Polymer, which lacks it. */
@@ -369,7 +398,8 @@ public class FellingLogBlock extends BarrierBlock
     @Override
     protected float getDestroyProgress(BlockState state, Player player, BlockGetter level,
             BlockPos pos) {
-        if (player instanceof ServerPlayer serverPlayer && ChopTool.chops(serverPlayer)) {
+        if (player instanceof ServerPlayer serverPlayer
+                && ChopTool.chopsAt(serverPlayer, level, pos)) {
             return 0.0F;
         }
         return originalAt(level, pos).getDestroyProgress(player, level, pos);
