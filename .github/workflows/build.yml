@@ -27,9 +27,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # fork is what the dev server runs; upstream fails on API only the fork has. A mod that uses
-        # fork API on purpose, or has no Polymer, drops upstream.
-        polymer_source: [fork, upstream]
+        # chopt calls PolymerBlockUtils.getBreakEventBlockState, which only the fork has, so the
+        # upstream Polymer is not built.
+        polymer_source: [fork]
 
     steps:
       - name: Check out source
