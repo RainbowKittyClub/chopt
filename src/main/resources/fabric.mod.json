@@ -21,6 +21,9 @@
     ],
     "fawe:position_data": [
       "club.rainbowkitty.chopt.compat.FawePositionData"
+    ],
+    "fawe:position_data_empty_stable": [
+      "club.rainbowkitty.chopt.compat.FaweEmptyPositionData"
     ]
   },
   "mixins": [
