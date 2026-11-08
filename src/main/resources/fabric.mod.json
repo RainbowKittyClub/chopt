@@ -18,6 +18,9 @@
   "entrypoints": {
     "main": [
       "${project.entrypoint}"
+    ],
+    "fawe:position_data": [
+      "club.rainbowkitty.chopt.compat.FawePositionData"
     ]
   },
   "mixins": [
